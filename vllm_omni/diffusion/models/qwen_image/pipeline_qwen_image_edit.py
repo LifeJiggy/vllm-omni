@@ -237,7 +237,8 @@ class QwenImageEditPipeline(
             self.vae_device = self.device
 
         logger.info(
-            f"Using device: {self.device}, text_encoder_device: {self.text_encoder_device}, vae_device: {self.vae_device}"
+            f"Using device: {self.device}, text_encoder_device: {self.text_encoder_device}, "
+            f"vae_device: {self.vae_device}"
         )
 
         # Check if model is a local path
@@ -334,7 +335,6 @@ class QwenImageEditPipeline(
         split_result = torch.split(selected, valid_lengths.tolist(), dim=0)
 
         return split_result
-
 
     def _get_qwen_prompt_embeds(
         self,

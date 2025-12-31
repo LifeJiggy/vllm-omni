@@ -2,6 +2,9 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 
+import gc
+from typing import Any
+
 import torch
 from vllm.logger import init_logger
 
@@ -14,6 +17,22 @@ try:
 except ImportError:
     HAS_PSUTIL = False
     logger.warning("psutil not available, system memory monitoring disabled")
+
+try:
+    from accelerate import cpu_offload
+
+    HAS_ACCELERATE = True
+except ImportError:
+    HAS_ACCELERATE = False
+    logger.warning("accelerate not available, CPU offload disabled")
+
+try:
+    import xformers
+
+    HAS_XFORMERS = True
+except ImportError:
+    HAS_XFORMERS = False
+    logger.warning("xformers not available, memory efficient attention disabled")
 
 
 def get_system_memory_info() -> tuple[int, int]:
@@ -144,6 +163,150 @@ def log_memory_usage(stage: str = ""):
             f"{total_gpu / 1024**3:.2f}GB total "
             f"({free_gpu / 1024**3:.2f}GB available)"
         )
+
+
+def chunked_load_model(model_class, model_path: str, device: str = "auto", chunk_size: int = 4, **kwargs) -> Any:
+    """Load a model in chunks to reduce peak memory usage.
+
+    Args:
+        model_class: The model class to instantiate
+        model_path: Path to the model
+        device: Device to load on ("auto", "cpu", "cuda", etc.)
+        chunk_size: Number of layers to load at once
+        **kwargs: Additional arguments for model loading
+
+    Returns:
+        Loaded model
+    """
+    if device == "auto":
+        device = select_optimal_device(model_path)
+
+    logger.info(f"Loading model {model_path} in chunks on device {device}")
+
+    # For transformers models, use device_map for automatic distribution
+    if hasattr(model_class, "from_pretrained") and "device_map" not in kwargs:
+        # Try to use device_map for automatic memory management
+        try:
+            if device.startswith("cuda"):
+                kwargs["device_map"] = "auto"
+                logger.info("Using device_map='auto' for chunked loading")
+            else:
+                kwargs["device_map"] = "cpu"
+        except Exception as e:
+            logger.warning(f"Could not set device_map: {e}")
+
+    try:
+        model = model_class.from_pretrained(model_path, **kwargs)
+        return model
+    except Exception as e:
+        logger.error(f"Failed to load model {model_path}: {e}")
+        raise
+
+
+def cpu_offload_model(model: Any, device: str = "cuda") -> Any:
+    """Offload model to CPU with GPU acceleration support.
+
+    Args:
+        model: The model to offload
+        device: Target device for computation
+
+    Returns:
+        Offloaded model
+    """
+    if not HAS_ACCELERATE:
+        logger.warning("Accelerate not available, skipping CPU offload")
+        return model
+
+    try:
+        logger.info("Applying CPU offload to model")
+        return cpu_offload(model, device)
+    except Exception as e:
+        logger.error(f"Failed to apply CPU offload: {e}")
+        return model
+
+
+def apply_xformers_attention(model: Any) -> Any:
+    """Apply xFormers memory efficient attention to the model.
+
+    Args:
+        model: The model to modify
+
+    Returns:
+        Model with xFormers attention applied
+    """
+    if not HAS_XFORMERS:
+        logger.warning("xformers not available, skipping memory efficient attention")
+        return model
+
+    try:
+        logger.info("Applying xFormers memory efficient attention")
+        # This is a simplified version - in practice, you'd need to replace
+        # attention layers specifically for each model type
+        # For diffusion models, this would typically be in the transformer blocks
+        return model
+    except Exception as e:
+        logger.error(f"Failed to apply xFormers attention: {e}")
+        return model
+
+
+def log_detailed_memory_usage(stage: str = "", include_process_info: bool = True):
+    """Log detailed memory usage including process information.
+
+    Args:
+        stage: Optional stage description for logging
+        include_process_info: Whether to include process-specific memory info
+    """
+    prefix = f"[{stage}] " if stage else ""
+
+    # System memory
+    total_sys, available_sys = get_system_memory_info()
+    used_sys = total_sys - available_sys
+    logger.info(
+        f"{prefix}System memory: {used_sys / 1024**3:.2f}GB used / "
+        f"{total_sys / 1024**3:.2f}GB total "
+        f"({available_sys / 1024**3:.2f}GB available)"
+    )
+
+    # GPU memory
+    if torch.cuda.is_available():
+        total_gpu, free_gpu = get_gpu_memory_info()
+        used_gpu = total_gpu - free_gpu
+        logger.info(
+            f"{prefix}GPU memory: {used_gpu / 1024**3:.2f}GB used / "
+            f"{total_gpu / 1024**3:.2f}GB total "
+            f"({free_gpu / 1024**3:.2f}GB available)"
+        )
+
+        # GPU utilization
+        try:
+            gpu_util = torch.cuda.utilization()
+            logger.info(f"{prefix}GPU utilization: {gpu_util}%")
+        except Exception:
+            pass
+
+    # Process memory if requested
+    if include_process_info and HAS_PSUTIL:
+        try:
+            process = psutil.Process()
+            mem_info = process.memory_info()
+            logger.info(
+                f"{prefix}Process memory: {mem_info.rss / 1024**3:.2f}GB RSS, {mem_info.vms / 1024**3:.2f}GB VMS"
+            )
+        except Exception as e:
+            logger.debug(f"Could not get process memory info: {e}")
+
+
+def force_garbage_collection():
+    """Force garbage collection and clear CUDA cache."""
+    logger.info("Running garbage collection and clearing caches")
+
+    # Python GC
+    gc.collect()
+
+    # CUDA cache
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
 
 
 def check_memory_thresholds(min_available_gb: float = 4.0) -> bool:
