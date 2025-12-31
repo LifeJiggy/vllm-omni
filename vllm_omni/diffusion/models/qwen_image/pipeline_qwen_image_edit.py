@@ -32,6 +32,11 @@ from vllm_omni.diffusion.models.qwen_image.qwen_image_transformer import (
     QwenImageTransformer2DModel,
 )
 from vllm_omni.diffusion.request import OmniDiffusionRequest
+from vllm_omni.diffusion.utils.memory_utils import (
+    log_memory_usage,
+    select_optimal_device,
+    check_memory_thresholds,
+)
 from vllm_omni.model_executor.model_loader.weight_utils import (
     download_weights_from_hf_specific,
 )
@@ -208,8 +213,29 @@ class QwenImageEditPipeline(
                 fall_back_to_pt=True,
             )
         ]
-        self.device = get_local_device()
+
+        # Log initial memory state
+        log_memory_usage("Pipeline initialization start")
+
+        # Check memory thresholds
+        if not check_memory_thresholds():
+            logger.warning("Memory thresholds not met, but continuing with initialization")
+
         model = od_config.model
+
+        # Automatic device selection based on available memory
+        if od_config.text_encoder_cpu_offload or od_config.vae_cpu_offload:
+            # If offload is explicitly enabled, use configured devices
+            self.device = get_local_device()
+            text_encoder_device = "cpu" if od_config.text_encoder_cpu_offload else self.device
+            vae_device = "cpu" if od_config.vae_cpu_offload else self.device
+        else:
+            # Automatic selection
+            self.device = select_optimal_device(model, "diffusion")
+            text_encoder_device = self.device
+            vae_device = self.device
+
+        logger.info(f"Using device: {self.device}, text_encoder_device: {text_encoder_device}, vae_device: {vae_device}")
 
         # Check if model is a local path
         local_files_only = os.path.exists(model)
@@ -219,10 +245,10 @@ class QwenImageEditPipeline(
         )
         self.text_encoder = Qwen2_5_VLForConditionalGeneration.from_pretrained(
             model, subfolder="text_encoder", local_files_only=local_files_only
-        )
+        ).to(text_encoder_device)
 
         self.vae = AutoencoderKLQwenImage.from_pretrained(model, subfolder="vae", local_files_only=local_files_only).to(
-            self.device
+            vae_device
         )
         self.transformer = QwenImageTransformer2DModel(od_config=od_config)
         self.tokenizer = Qwen2Tokenizer.from_pretrained(model, subfolder="tokenizer", local_files_only=local_files_only)
@@ -240,6 +266,9 @@ class QwenImageEditPipeline(
         self.prompt_template_encode = "<|im_start|>system\nDescribe the key features of the input image (color, shape, size, texture, objects, background), then explain how the user's text instruction should alter or modify the image. Generate a new image that meets the user's requirements while maintaining consistency with the original input where appropriate.<|im_end|>\n<|im_start|>user\n<|vision_start|><|image_pad|><|vision_end|>{}<|im_end|>\n<|im_start|>assistant\n"  # noqa: E501
         self.prompt_template_encode_start_idx = 64
         self.default_sample_size = 128
+
+        # Log memory usage after initialization
+        log_memory_usage("Pipeline initialization complete")
 
     def check_inputs(
         self,
@@ -371,6 +400,11 @@ class QwenImageEditPipeline(
             return_tensors="pt",
         ).to(self.device)
 
+        # Move text_encoder to device if it's on CPU (offloaded)
+        text_encoder_device = next(self.text_encoder.parameters()).device
+        if text_encoder_device != self.device:
+            self.text_encoder.to(self.device)
+
         outputs = self.text_encoder(
             input_ids=model_inputs.input_ids,
             attention_mask=model_inputs.attention_mask,
@@ -457,6 +491,11 @@ class QwenImageEditPipeline(
         return latents
 
     def _encode_vae_image(self, image: torch.Tensor, generator: torch.Generator):
+        # Move VAE to device if it's on CPU (offloaded)
+        vae_device = next(self.vae.parameters()).device
+        if vae_device != self.device:
+            self.vae.to(self.device)
+
         if isinstance(generator, list):
             image_latents = [
                 retrieve_latents(self.vae.encode(image[i : i + 1]), generator=generator[i], sample_mode="argmax")
@@ -812,6 +851,11 @@ class QwenImageEditPipeline(
         if output_type == "latent":
             image = latents
         else:
+            # Move VAE to device if it's on CPU (offloaded)
+            vae_device = next(self.vae.parameters()).device
+            if vae_device != self.device:
+                self.vae.to(self.device)
+
             latents = self._unpack_latents(latents, height, width, self.vae_scale_factor)
             latents = latents.to(self.vae.dtype)
             latents_mean = (
