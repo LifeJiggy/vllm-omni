@@ -208,7 +208,13 @@ class DiffusersPipelineLoader:
 
     def load_weights(self, model: nn.Module) -> None:
         weights_to_load = {name for name, _ in model.named_parameters()}
-        loaded_weights = model.load_weights(self.get_all_weights(model))
+
+        # Check for chunked loading configuration
+        chunk_size_mb = getattr(self.load_config, 'model_loader_extra_config', {}).get('chunk_size_mb', 0)
+        if chunk_size_mb > 0:
+            loaded_weights = self._load_weights_chunked(model, chunk_size_mb * 1024 * 1024)  # Convert to bytes
+        else:
+            loaded_weights = model.load_weights(self.get_all_weights(model))
 
         self.counter_after_loading_weights = time.perf_counter()
         logger.info_once(
@@ -226,3 +232,44 @@ class DiffusersPipelineLoader:
         #             "Following weights were not initialized from "
         #             f"checkpoint: {weights_not_loaded}"
         #         )
+
+    def _load_weights_chunked(self, model: nn.Module, chunk_size_bytes: int) -> set[str] | None:
+        """Load weights in chunks to reduce peak memory usage."""
+        logger.info("Loading weights in chunks of %.2f MB", chunk_size_bytes / (1024 * 1024))
+
+        all_weights = list(self.get_all_weights(model))
+        loaded_weights = set()
+
+        # Group weights by size to optimize chunking
+        weight_chunks = []
+        current_chunk = []
+        current_size = 0
+
+        for name, tensor in all_weights:
+            tensor_size = tensor.numel() * tensor.element_size()
+            if current_size + tensor_size > chunk_size_bytes and current_chunk:
+                weight_chunks.append(current_chunk)
+                current_chunk = []
+                current_size = 0
+
+            current_chunk.append((name, tensor))
+            current_size += tensor_size
+
+        if current_chunk:
+            weight_chunks.append(current_chunk)
+
+        logger.info("Split weights into %d chunks", len(weight_chunks))
+
+        for i, chunk in enumerate(weight_chunks):
+            logger.debug("Loading chunk %d/%d with %d weights", i + 1, len(weight_chunks), len(chunk))
+            chunk_loaded = model.load_weights(iter(chunk))
+            if chunk_loaded is not None:
+                loaded_weights.update(chunk_loaded)
+
+            # Force garbage collection to free memory
+            import gc
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+        return loaded_weights if loaded_weights else None
