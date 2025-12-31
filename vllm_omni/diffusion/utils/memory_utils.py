@@ -1,22 +1,22 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
-import os
+
 import torch
-from typing import Optional, Tuple
 from vllm.logger import init_logger
 
 logger = init_logger(__name__)
 
 try:
     import psutil
+
     HAS_PSUTIL = True
 except ImportError:
     HAS_PSUTIL = False
     logger.warning("psutil not available, system memory monitoring disabled")
 
 
-def get_system_memory_info() -> Tuple[int, int]:
+def get_system_memory_info() -> tuple[int, int]:
     """Get system memory information in bytes.
 
     Returns:
@@ -31,7 +31,7 @@ def get_system_memory_info() -> Tuple[int, int]:
     return mem.total, mem.available
 
 
-def get_gpu_memory_info(device: Optional[torch.device] = None) -> Tuple[int, int]:
+def get_gpu_memory_info(device: torch.device | None = None) -> tuple[int, int]:
     """Get GPU memory information in bytes.
 
     Args:
@@ -94,21 +94,27 @@ def select_optimal_device(model_name_or_path: str, model_type: str = "diffusion"
     if torch.cuda.is_available():
         total_gpu, free_gpu = get_gpu_memory_info()
         if free_gpu > estimated_usage * 1.2:  # 20% buffer
-            logger.info(f"Selected GPU device (free: {free_gpu/1024**3:.2f}GB, "
-                       f"estimated usage: {estimated_usage/1024**3:.2f}GB)")
+            logger.info(
+                f"Selected GPU device (free: {free_gpu / 1024**3:.2f}GB, "
+                f"estimated usage: {estimated_usage / 1024**3:.2f}GB)"
+            )
             return "cuda"
 
     # Check system memory
     total_sys, available_sys = get_system_memory_info()
     if available_sys > estimated_usage * 1.2:  # 20% buffer
-        logger.info(f"Selected CPU device (available: {available_sys/1024**3:.2f}GB, "
-                   f"estimated usage: {estimated_usage/1024**3:.2f}GB)")
+        logger.info(
+            f"Selected CPU device (available: {available_sys / 1024**3:.2f}GB, "
+            f"estimated usage: {estimated_usage / 1024**3:.2f}GB)"
+        )
         return "cpu"
 
     # Fallback to CPU even if memory is tight
-    logger.warning(f"Memory may be insufficient. Using CPU anyway "
-                  f"(available: {available_sys/1024**3:.2f}GB, "
-                  f"estimated usage: {estimated_usage/1024**3:.2f}GB)")
+    logger.warning(
+        f"Memory may be insufficient. Using CPU anyway "
+        f"(available: {available_sys / 1024**3:.2f}GB, "
+        f"estimated usage: {estimated_usage / 1024**3:.2f}GB)"
+    )
     return "cpu"
 
 
@@ -123,17 +129,21 @@ def log_memory_usage(stage: str = ""):
     # System memory
     total_sys, available_sys = get_system_memory_info()
     used_sys = total_sys - available_sys
-    logger.info(f"{prefix}System memory: {used_sys/1024**3:.2f}GB used / "
-               f"{total_sys/1024**3:.2f}GB total "
-               f"({available_sys/1024**3:.2f}GB available)")
+    logger.info(
+        f"{prefix}System memory: {used_sys / 1024**3:.2f}GB used / "
+        f"{total_sys / 1024**3:.2f}GB total "
+        f"({available_sys / 1024**3:.2f}GB available)"
+    )
 
     # GPU memory
     if torch.cuda.is_available():
         total_gpu, free_gpu = get_gpu_memory_info()
         used_gpu = total_gpu - free_gpu
-        logger.info(f"{prefix}GPU memory: {used_gpu/1024**3:.2f}GB used / "
-                   f"{total_gpu/1024**3:.2f}GB total "
-                   f"({free_gpu/1024**3:.2f}GB available)")
+        logger.info(
+            f"{prefix}GPU memory: {used_gpu / 1024**3:.2f}GB used / "
+            f"{total_gpu / 1024**3:.2f}GB total "
+            f"({free_gpu / 1024**3:.2f}GB available)"
+        )
 
 
 def check_memory_thresholds(min_available_gb: float = 4.0) -> bool:
@@ -150,16 +160,16 @@ def check_memory_thresholds(min_available_gb: float = 4.0) -> bool:
     # Check system memory
     _, available_sys = get_system_memory_info()
     if available_sys < min_available_bytes:
-        logger.warning(f"Low system memory: {available_sys/1024**3:.2f}GB available "
-                      f"(minimum required: {min_available_gb}GB)")
+        logger.warning(
+            f"Low system memory: {available_sys / 1024**3:.2f}GB available (minimum required: {min_available_gb}GB)"
+        )
         return False
 
     # Check GPU memory if available
     if torch.cuda.is_available():
         _, free_gpu = get_gpu_memory_info()
         if free_gpu < min_available_bytes:
-            logger.warning(f"Low GPU memory: {free_gpu/1024**3:.2f}GB free "
-                          f"(minimum required: {min_available_gb}GB)")
+            logger.warning(f"Low GPU memory: {free_gpu / 1024**3:.2f}GB free (minimum required: {min_available_gb}GB)")
             return False
 
     return True

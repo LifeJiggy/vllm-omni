@@ -210,7 +210,7 @@ class DiffusersPipelineLoader:
         weights_to_load = {name for name, _ in model.named_parameters()}
 
         # Check for chunked loading configuration
-        chunk_size_mb = getattr(self.load_config, 'model_loader_extra_config', {}).get('chunk_size_mb', 0)
+        chunk_size_mb = getattr(self.load_config, "model_loader_extra_config", {}).get("chunk_size_mb", 0)
         if chunk_size_mb > 0:
             loaded_weights = self._load_weights_chunked(model, chunk_size_mb * 1024 * 1024)  # Convert to bytes
         else:
@@ -268,6 +268,7 @@ class DiffusersPipelineLoader:
 
             # Force garbage collection to free memory
             import gc
+
             gc.collect()
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()

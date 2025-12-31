@@ -33,9 +33,9 @@ from vllm_omni.diffusion.models.qwen_image.qwen_image_transformer import (
 )
 from vllm_omni.diffusion.request import OmniDiffusionRequest
 from vllm_omni.diffusion.utils.memory_utils import (
+    check_memory_thresholds,
     log_memory_usage,
     select_optimal_device,
-    check_memory_thresholds,
 )
 from vllm_omni.model_executor.model_loader.weight_utils import (
     download_weights_from_hf_specific,
@@ -235,7 +235,9 @@ class QwenImageEditPipeline(
             text_encoder_device = self.device
             vae_device = self.device
 
-        logger.info(f"Using device: {self.device}, text_encoder_device: {text_encoder_device}, vae_device: {vae_device}")
+        logger.info(
+            f"Using device: {self.device}, text_encoder_device: {text_encoder_device}, vae_device: {vae_device}"
+        )
 
         # Check if model is a local path
         local_files_only = os.path.exists(model)
