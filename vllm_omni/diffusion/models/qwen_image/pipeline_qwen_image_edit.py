@@ -37,6 +37,10 @@ from vllm_omni.diffusion.utils.memory_utils import (
     log_memory_usage,
     select_optimal_device,
 )
+from vllm_omni.diffusion.utils.advanced_memory_management import (
+    AdvancedMemoryConfig,
+    AdvancedMemoryManager,
+)
 from vllm_omni.model_executor.model_loader.weight_utils import (
     download_weights_from_hf_specific,
 )
@@ -214,6 +218,42 @@ class QwenImageEditPipeline(
             )
         ]
 
+        # Initialize advanced memory management if enabled
+        if od_config.enable_advanced_memory_management:
+            from vllm_omni.diffusion.utils.advanced_memory_management import (
+                MemoryConfig,
+                CacheConfig,
+                OffloadConfig,
+                MonitorConfig,
+            )
+
+            memory_config = AdvancedMemoryConfig(
+                memory=MemoryConfig(
+                    enable_memory_pools=True,
+                    pool_sizes=od_config.memory_pool_sizes,
+                    fragmentation_threshold=od_config.memory_fragmentation_threshold,
+                    cleanup_interval=od_config.memory_cleanup_interval,
+                ),
+                cache=CacheConfig(
+                    max_size_gb=od_config.memory_cache_max_size_gb,
+                ),
+                offload=OffloadConfig(
+                    enable_auto_offload=od_config.enable_auto_offload,
+                    offload_threshold=od_config.offload_threshold,
+                    restore_threshold=od_config.restore_threshold,
+                    min_offload_interval=od_config.min_offload_interval,
+                    usage_window=od_config.usage_window,
+                ),
+                monitor=MonitorConfig(
+                    enable_monitoring=od_config.enable_memory_monitoring,
+                    monitoring_interval=od_config.memory_monitoring_interval,
+                    alert_thresholds=od_config.memory_alert_thresholds,
+                ),
+            )
+            self.memory_manager = AdvancedMemoryManager(memory_config)
+        else:
+            self.memory_manager = None
+
         # Log initial memory state
         log_memory_usage("Pipeline initialization start")
 
@@ -273,6 +313,9 @@ class QwenImageEditPipeline(
 
         # Log memory usage after initialization
         log_memory_usage("Pipeline initialization complete")
+
+        # Record initial model usage for memory management
+        self.memory_manager.record_model_usage("qwen_image_edit_pipeline")
 
     def check_inputs(
         self,
@@ -668,6 +711,14 @@ class QwenImageEditPipeline(
         max_sequence_length: int = 512,
     ) -> DiffusionOutput:
         """Forward pass for image editing."""
+        # Record model usage at start of inference
+        if self.memory_manager:
+            self.memory_manager.record_model_usage("qwen_image_edit_pipeline")
+
+            # Check if offloading is needed before heavy computation
+            if self.memory_manager.check_offload_needed("qwen_image_edit_pipeline"):
+                logger.warning("Memory pressure detected, considering model offloading")
+
         prompt = req.prompt if req.prompt is not None else prompt
         negative_prompt = req.negative_prompt if req.negative_prompt is not None else negative_prompt
 
