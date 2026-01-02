@@ -33,9 +33,13 @@ from vllm_omni.diffusion.models.qwen_image.qwen_image_transformer import (
 )
 from vllm_omni.diffusion.request import OmniDiffusionRequest
 from vllm_omni.diffusion.utils.memory_utils import (
+    check_memory_thresholds,
     log_memory_usage,
     select_optimal_device,
-    check_memory_thresholds,
+)
+from vllm_omni.diffusion.utils.advanced_memory_management import (
+    AdvancedMemoryConfig,
+    AdvancedMemoryManager,
 )
 from vllm_omni.model_executor.model_loader.weight_utils import (
     download_weights_from_hf_specific,
@@ -214,6 +218,42 @@ class QwenImageEditPipeline(
             )
         ]
 
+        # Initialize advanced memory management if enabled
+        if od_config.enable_advanced_memory_management:
+            from vllm_omni.diffusion.utils.advanced_memory_management import (
+                MemoryConfig,
+                CacheConfig,
+                OffloadConfig,
+                MonitorConfig,
+            )
+
+            memory_config = AdvancedMemoryConfig(
+                memory=MemoryConfig(
+                    enable_memory_pools=True,
+                    pool_sizes=od_config.memory_pool_sizes,
+                    fragmentation_threshold=od_config.memory_fragmentation_threshold,
+                    cleanup_interval=od_config.memory_cleanup_interval,
+                ),
+                cache=CacheConfig(
+                    max_size_gb=od_config.memory_cache_max_size_gb,
+                ),
+                offload=OffloadConfig(
+                    enable_auto_offload=od_config.enable_auto_offload,
+                    offload_threshold=od_config.offload_threshold,
+                    restore_threshold=od_config.restore_threshold,
+                    min_offload_interval=od_config.min_offload_interval,
+                    usage_window=od_config.usage_window,
+                ),
+                monitor=MonitorConfig(
+                    enable_monitoring=od_config.enable_memory_monitoring,
+                    monitoring_interval=od_config.memory_monitoring_interval,
+                    alert_thresholds=od_config.memory_alert_thresholds,
+                ),
+            )
+            self.memory_manager = AdvancedMemoryManager(memory_config)
+        else:
+            self.memory_manager = None
+
         # Log initial memory state
         log_memory_usage("Pipeline initialization start")
 
@@ -225,17 +265,21 @@ class QwenImageEditPipeline(
 
         # Automatic device selection based on available memory
         if od_config.text_encoder_cpu_offload or od_config.vae_cpu_offload:
-            # If offload is explicitly enabled, use configured devices
-            self.device = get_local_device()
-            text_encoder_device = "cpu" if od_config.text_encoder_cpu_offload else self.device
-            vae_device = "cpu" if od_config.vae_cpu_offload else self.device
+            # If offload is explicitly enabled, load models on CPU to save memory,
+            # but they will be moved to GPU during inference for computation
+            self.device = get_local_device()  # Main compute device (typically GPU)
+            self.text_encoder_device = "cpu" if od_config.text_encoder_cpu_offload else self.device
+            self.vae_device = "cpu" if od_config.vae_cpu_offload else self.device
         else:
-            # Automatic selection
+            # Automatic selection without explicit offloading
             self.device = select_optimal_device(model, "diffusion")
-            text_encoder_device = self.device
-            vae_device = self.device
+            self.text_encoder_device = self.device
+            self.vae_device = self.device
 
-        logger.info(f"Using device: {self.device}, text_encoder_device: {text_encoder_device}, vae_device: {vae_device}")
+        logger.info(
+            f"Using device: {self.device}, text_encoder_device: {self.text_encoder_device}, "
+            f"vae_device: {self.vae_device}"
+        )
 
         # Check if model is a local path
         local_files_only = os.path.exists(model)
@@ -245,10 +289,10 @@ class QwenImageEditPipeline(
         )
         self.text_encoder = Qwen2_5_VLForConditionalGeneration.from_pretrained(
             model, subfolder="text_encoder", local_files_only=local_files_only
-        ).to(text_encoder_device)
+        ).to(self.text_encoder_device)
 
         self.vae = AutoencoderKLQwenImage.from_pretrained(model, subfolder="vae", local_files_only=local_files_only).to(
-            vae_device
+            self.vae_device
         )
         self.transformer = QwenImageTransformer2DModel(od_config=od_config)
         self.tokenizer = Qwen2Tokenizer.from_pretrained(model, subfolder="tokenizer", local_files_only=local_files_only)
@@ -269,6 +313,9 @@ class QwenImageEditPipeline(
 
         # Log memory usage after initialization
         log_memory_usage("Pipeline initialization complete")
+
+        # Record initial model usage for memory management
+        self.memory_manager.record_model_usage("qwen_image_edit_pipeline")
 
     def check_inputs(
         self,
@@ -335,51 +382,6 @@ class QwenImageEditPipeline(
     def _get_qwen_prompt_embeds(
         self,
         prompt: str | list[str] = None,
-        image: torch.Tensor | None = None,
-        dtype: torch.dtype | None = None,
-    ):
-        dtype = dtype or self.text_encoder.dtype
-
-        prompt = [prompt] if isinstance(prompt, str) else prompt
-
-        template = self.prompt_template_encode
-        drop_idx = self.prompt_template_encode_start_idx
-        txt = [template.format(e) for e in prompt]
-
-        model_inputs = self.processor(
-            text=txt,
-            images=image,
-            padding=True,
-            return_tensors="pt",
-        ).to(self.device)
-
-        outputs = self.text_encoder(
-            input_ids=model_inputs.input_ids,
-            attention_mask=model_inputs.attention_mask,
-            pixel_values=model_inputs.pixel_values,
-            image_grid_thw=model_inputs.image_grid_thw,
-            output_hidden_states=True,
-        )
-
-        hidden_states = outputs.hidden_states[-1]
-        split_hidden_states = self._extract_masked_hidden(hidden_states, model_inputs.attention_mask)
-        split_hidden_states = [e[drop_idx:] for e in split_hidden_states]
-        attn_mask_list = [torch.ones(e.size(0), dtype=torch.long, device=e.device) for e in split_hidden_states]
-        max_seq_len = max([e.size(0) for e in split_hidden_states])
-        prompt_embeds = torch.stack(
-            [torch.cat([u, u.new_zeros(max_seq_len - u.size(0), u.size(1))]) for u in split_hidden_states]
-        )
-        encoder_attention_mask = torch.stack(
-            [torch.cat([u, u.new_zeros(max_seq_len - u.size(0))]) for u in attn_mask_list]
-        )
-
-        prompt_embeds = prompt_embeds.to(dtype=dtype, device=self.device)
-
-        return prompt_embeds, encoder_attention_mask
-
-    def _get_qwen_prompt_embeds(
-        self,
-        prompt: str | list[str] = None,
         image: PIL.Image.Image | torch.Tensor | None = None,
         dtype: torch.dtype | None = None,
     ):
@@ -401,8 +403,7 @@ class QwenImageEditPipeline(
         ).to(self.device)
 
         # Move text_encoder to device if it's on CPU (offloaded)
-        text_encoder_device = next(self.text_encoder.parameters()).device
-        if text_encoder_device != self.device:
+        if self.text_encoder_device != self.device:
             self.text_encoder.to(self.device)
 
         outputs = self.text_encoder(
@@ -412,6 +413,10 @@ class QwenImageEditPipeline(
             image_grid_thw=model_inputs.image_grid_thw,
             output_hidden_states=True,
         )
+
+        # Move text_encoder back to CPU if it was offloaded
+        if self.text_encoder_device != self.device:
+            self.text_encoder.to(self.text_encoder_device)
 
         hidden_states = outputs.hidden_states[-1]
         split_hidden_states = self._extract_masked_hidden(hidden_states, model_inputs.attention_mask)
@@ -492,8 +497,7 @@ class QwenImageEditPipeline(
 
     def _encode_vae_image(self, image: torch.Tensor, generator: torch.Generator):
         # Move VAE to device if it's on CPU (offloaded)
-        vae_device = next(self.vae.parameters()).device
-        if vae_device != self.device:
+        if self.vae_device != self.device:
             self.vae.to(self.device)
 
         if isinstance(generator, list):
@@ -504,6 +508,11 @@ class QwenImageEditPipeline(
             image_latents = torch.cat(image_latents, dim=0)
         else:
             image_latents = retrieve_latents(self.vae.encode(image), generator=generator, sample_mode="argmax")
+
+        # Move VAE back to CPU if it was offloaded
+        if self.vae_device != self.device:
+            self.vae.to(self.vae_device)
+
         latents_mean = (
             torch.tensor(self.vae.config.latents_mean)
             .view(1, self.latent_channels, 1, 1, 1)
@@ -702,6 +711,14 @@ class QwenImageEditPipeline(
         max_sequence_length: int = 512,
     ) -> DiffusionOutput:
         """Forward pass for image editing."""
+        # Record model usage at start of inference
+        if self.memory_manager:
+            self.memory_manager.record_model_usage("qwen_image_edit_pipeline")
+
+            # Check if offloading is needed before heavy computation
+            if self.memory_manager.check_offload_needed("qwen_image_edit_pipeline"):
+                logger.warning("Memory pressure detected, considering model offloading")
+
         prompt = req.prompt if req.prompt is not None else prompt
         negative_prompt = req.negative_prompt if req.negative_prompt is not None else negative_prompt
 
@@ -868,6 +885,10 @@ class QwenImageEditPipeline(
             )
             latents = latents / latents_std + latents_mean
             image = self.vae.decode(latents, return_dict=False)[0][:, :, 0]
+
+            # Move VAE back to CPU if it was offloaded
+            if self.vae_device != self.device:
+                self.vae.to(self.vae_device)
 
         return DiffusionOutput(output=image)
 

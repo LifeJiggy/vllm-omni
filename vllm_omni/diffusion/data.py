@@ -353,6 +353,27 @@ class OmniDiffusionConfig:
     # support multi images input
     supports_multimodal_inputs: bool = False
 
+    # Advanced Memory Management
+    enable_advanced_memory_management: bool = True
+    memory_pool_sizes: dict[str, int] = field(default_factory=lambda: {
+        "cpu": 8 * 1024**3,  # 8GB
+        "cuda": 16 * 1024**3  # 16GB
+    })
+    memory_cache_max_size_gb: float = 4.0
+    memory_fragmentation_threshold: float = 0.1
+    memory_cleanup_interval: float = 60.0
+    enable_memory_monitoring: bool = True
+    memory_monitoring_interval: float = 1.0
+    memory_alert_thresholds: dict[str, float] = field(default_factory=lambda: {
+        "warning": 0.75,
+        "critical": 0.9
+    })
+    enable_auto_offload: bool = True
+    offload_threshold: float = 0.8
+    restore_threshold: float = 0.6
+    min_offload_interval: float = 10.0
+    usage_window: float = 300.0
+
     # Logging
     log_level: str = "info"
 
