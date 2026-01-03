@@ -78,12 +78,12 @@ from vllm.tokenizers.mistral import (
 from vllm.transformers_utils.tokenizer import AnyTokenizer
 from vllm.utils.collection_utils import as_list
 
+from vllm_omni.batching import MultiModalBatchingScheduler
 from vllm_omni.entrypoints.chat_utils import parse_chat_messages_futures
 from vllm_omni.entrypoints.openai.audio_utils_mixin import AudioMixin
 from vllm_omni.entrypoints.openai.protocol import OmniChatCompletionStreamResponse
 from vllm_omni.entrypoints.openai.protocol.audio import AudioResponse, CreateAudio
 from vllm_omni.outputs import OmniRequestOutput
-from vllm_omni.batching import MultiModalBatchingScheduler, RequestPriority
 
 if TYPE_CHECKING:
     from vllm_omni.entrypoints.async_omni_diffusion import AsyncOmniDiffusion
@@ -107,20 +107,20 @@ class OmniOpenAIServingChat(OpenAIServingChat, AudioMixin):
     _diffusion_model_name: str = ""
 
     # Batching attributes
-    _batching_scheduler: Optional[MultiModalBatchingScheduler] = None
+    _batching_scheduler: MultiModalBatchingScheduler | None = None
     _enable_batching: bool = True
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
         # Initialize batching scheduler if enabled
-        if self._enable_batching and hasattr(self, 'engine_client') and self.engine_client:
+        if self._enable_batching and hasattr(self, "engine_client") and self.engine_client:
             self._batching_scheduler = MultiModalBatchingScheduler(
                 engine=self.engine_client,
-                max_batch_size=getattr(self, 'max_batch_size', 32),
-                batch_timeout=getattr(self, 'batch_timeout', 0.1),
-                max_queue_size=getattr(self, 'max_queue_size', 1000),
-                max_concurrent_batches=getattr(self, 'max_concurrent_batches', 4),
+                max_batch_size=getattr(self, "max_batch_size", 32),
+                batch_timeout=getattr(self, "batch_timeout", 0.1),
+                max_queue_size=getattr(self, "max_queue_size", 1000),
+                max_concurrent_batches=getattr(self, "max_concurrent_batches", 4),
             )
             # Start the scheduler
             asyncio.create_task(self._batching_scheduler.start())

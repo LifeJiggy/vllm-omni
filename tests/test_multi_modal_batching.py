@@ -2,12 +2,13 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import asyncio
-import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from vllm_omni.batching.request_queue import RequestQueue, RequestPriority
-from vllm_omni.batching.modality_batcher import ModalityBatcher
+import pytest
+
 from vllm_omni.batching.batch_processor import BatchProcessor
+from vllm_omni.batching.modality_batcher import ModalityBatcher
+from vllm_omni.batching.request_queue import RequestPriority, RequestQueue
 from vllm_omni.batching.scheduler import MultiModalBatchingScheduler
 
 

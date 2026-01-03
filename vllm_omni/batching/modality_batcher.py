@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
-from typing import Dict, List, Optional, Set
 from collections import defaultdict
 
-from .request_queue import QueuedRequest
 from vllm.logger import init_logger
+
+from .request_queue import QueuedRequest
 
 logger = init_logger(__name__)
 
@@ -23,7 +23,7 @@ class MclodalityBatcher:
 
         # Modality compatibility matrix
         # True means modalities can be batched together
-        self._compatibility_matrix: Dict[str, Set[str]] = {
+        self._compatibility_matrix: dict[str, set[str]] = {
             "text": {"text", "image", "video"},
             "image": {"text", "image"},
             "video": {"text", "video"},
@@ -34,7 +34,7 @@ class MclodalityBatcher:
         """Check if two modalities can be batched together."""
         return modality2 in self._compatibility_matrix.get(modality1, set())
 
-    def create_batches(self, requests: List[QueuedRequest]) -> List[List[QueuedRequest]]:
+    def create_batches(self, requests: list[QueuedRequest]) -> list[list[QueuedRequest]]:
         """Create batches from a list of requests.
 
         Groups requests by compatible modalities and respects batch size limits.
@@ -49,7 +49,7 @@ class MclodalityBatcher:
             return []
 
         # Group requests by modality
-        modality_groups: Dict[str, List[QueuedRequest]] = defaultdict(list)
+        modality_groups: dict[str, list[QueuedRequest]] = defaultdict(list)
         for req in requests:
             modality_groups[req.modality].append(req)
 
@@ -62,7 +62,7 @@ class MclodalityBatcher:
             else:
                 # Split large groups into smaller batches
                 for i in range(0, len(reqs), self.max_batch_size):
-                    batch = reqs[i:i + self.max_batch_size]
+                    batch = reqs[i : i + self.max_batch_size]
                     batches.append(batch)
 
         # Then, try to merge compatible heterogeneous batches
@@ -70,7 +70,7 @@ class MclodalityBatcher:
 
         return merged_batches
 
-    def _merge_compatible_batches(self, batches: List[List[QueuedRequest]]) -> List[List[QueuedRequest]]:
+    def _merge_compatible_batches(self, batches: list[list[QueuedRequest]]) -> list[list[QueuedRequest]]:
         """Merge compatible batches to optimize resource usage."""
         if len(batches) <= 1:
             return batches
@@ -99,7 +99,7 @@ class MclodalityBatcher:
 
         return merged
 
-    def _batches_compatible(self, batch1: List[QueuedRequest], batch2: List[QueuedRequest]) -> bool:
+    def _batches_compatible(self, batch1: list[QueuedRequest], batch2: list[QueuedRequest]) -> bool:
         """Check if two batches have compatible modalities."""
         batch1_modalities = {req.modality for req in batch1}
         batch2_modalities = {req.modality for req in batch2}
@@ -124,7 +124,7 @@ class MclodalityBatcher:
 
         return modality_batch_sizes.get(modality, self.max_batch_size)
 
-    def should_flush_batch(self, batch: List[QueuedRequest], current_time: float) -> bool:
+    def should_flush_batch(self, batch: list[QueuedRequest], current_time: float) -> bool:
         """Determine if a batch should be flushed for processing.
 
         Args:

@@ -5,8 +5,8 @@ import asyncio
 import heapq
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
 from enum import Enum
+from typing import Any
 
 from vllm.logger import init_logger
 
@@ -15,6 +15,7 @@ logger = init_logger(__name__)
 
 class RequestPriority(Enum):
     """Priority levels for requests."""
+
     LOW = 1
     NORMAL = 2
     HIGH = 3
@@ -24,12 +25,13 @@ class RequestPriority(Enum):
 @dataclass(order=True)
 class QueuedRequest:
     """A request in the queue with priority and metadata."""
+
     priority: int
     timestamp: float
     request_id: str
-    data: Dict[str, Any] = field(compare=False)
+    data: dict[str, Any] = field(compare=False)
     modality: str = field(compare=False, default="text")
-    future: Optional[asyncio.Future] = field(compare=False, default=None)
+    future: asyncio.Future | None = field(compare=False, default=None)
 
     def __post_init__(self):
         # For heapq, we want higher priority (larger number) to come first
@@ -44,7 +46,7 @@ class RequestQueue:
     """
 
     def __init__(self, max_size: int = 1000):
-        self._queue: List[QueuedRequest] = []
+        self._queue: list[QueuedRequest] = []
         self._max_size = max_size
         self._lock = asyncio.Lock()
         self._not_empty = asyncio.Condition(self._lock)
@@ -53,7 +55,7 @@ class RequestQueue:
     async def put(
         self,
         request_id: str,
-        data: Dict[str, Any],
+        data: dict[str, Any],
         modality: str = "text",
         priority: RequestPriority = RequestPriority.NORMAL,
     ) -> None:
@@ -94,7 +96,7 @@ class RequestQueue:
             logger.debug(f"Dequeued request {request.request_id}")
             return request
 
-    async def peek(self) -> Optional[QueuedRequest]:
+    async def peek(self) -> QueuedRequest | None:
         """Peek at the highest priority request without removing it."""
         async with self._lock:
             if not self._queue:
@@ -115,7 +117,7 @@ class RequestQueue:
             self._queue.clear()
             self._not_full.notify_all()
 
-    def get_requests_by_modality(self, modality: str) -> List[QueuedRequest]:
+    def get_requests_by_modality(self, modality: str) -> list[QueuedRequest]:
         """Get all requests of a specific modality (for batching)."""
         return [req for req in self._queue if req.modality == modality]
 

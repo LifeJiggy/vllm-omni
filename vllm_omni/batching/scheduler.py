@@ -3,12 +3,14 @@
 
 import asyncio
 import time
-from typing import Any, Dict, List, Optional, Callable
+from collections.abc import Callable
+from typing import Any
 
-from .request_queue import RequestQueue, QueuedRequest, RequestPriority
-from .modality_batcher import ModalityBatcher
-from .batch_processor import BatchProcessor
 from vllm.logger import init_logger
+
+from .batch_processor import BatchProcessor
+from .modality_batcher import ModalityBatcher
+from .request_queue import QueuedRequest, RequestPriority, RequestQueue
 
 logger = init_logger(__name__)
 
@@ -39,8 +41,8 @@ class MultiModalBatchingScheduler:
         )
 
         self._running = False
-        self._scheduler_task: Optional[asyncio.Task] = None
-        self._result_callbacks: Dict[str, Callable] = {}
+        self._scheduler_task: asyncio.Task | None = None
+        self._result_callbacks: dict[str, Callable] = {}
 
     async def start(self) -> None:
         """Start the batching scheduler."""
@@ -71,11 +73,11 @@ class MultiModalBatchingScheduler:
         self,
         request_id: str,
         prompt: Any,
-        sampling_params: Optional[Dict[str, Any]] = None,
+        sampling_params: dict[str, Any] | None = None,
         modality: str = "text",
         priority: RequestPriority = RequestPriority.NORMAL,
-        output_modalities: Optional[List[str]] = None,
-        callback: Optional[Callable[[str, Any], None]] = None,
+        output_modalities: list[str] | None = None,
+        callback: Callable[[str, Any], None] | None = None,
     ) -> None:
         """Submit a request for batching and processing.
 
@@ -112,22 +114,18 @@ class MultiModalBatchingScheduler:
             while self._running:
                 # Collect pending requests
                 pending_requests = []
-                batch_start_time = time.time()
 
                 # Get requests until we have enough for a batch or timeout
                 while self._running:
                     try:
                         # Try to get a request with timeout
                         request = await asyncio.wait_for(
-                            self.request_queue.get(),
-                            timeout=self.modality_batcher.batch_timeout
+                            self.request_queue.get(), timeout=self.modality_batcher.batch_timeout
                         )
                         pending_requests.append(request)
 
                         # Check if we should flush the current batch
-                        if self.modality_batcher.should_flush_batch(
-                            pending_requests, time.time()
-                        ):
+                        if self.modality_batcher.should_flush_batch(pending_requests, time.time()):
                             break
 
                     except asyncio.TimeoutError:
@@ -148,15 +146,13 @@ class MultiModalBatchingScheduler:
                     if not batch:
                         continue
 
-                    asyncio.create_task(
-                        self._process_batch_async(batch)
-                    )
+                    asyncio.create_task(self._process_batch_async(batch))
 
         except Exception as e:
             logger.error(f"Scheduler loop error: {e}")
             raise
 
-    async def _process_batch_async(self, batch: List[QueuedRequest]) -> None:
+    async def _process_batch_async(self, batch: list[QueuedRequest]) -> None:
         """Process a batch asynchronously."""
         try:
             await self.batch_processor.process_batch(
@@ -180,7 +176,7 @@ class MultiModalBatchingScheduler:
 
         logger.debug(f"Handled result for request {request_id}")
 
-    def get_queue_stats(self) -> Dict[str, Any]:
+    def get_queue_stats(self) -> dict[str, Any]:
         """Get statistics about the current queue state."""
         return {
             "queue_size": self.request_queue.qsize(),

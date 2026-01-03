@@ -2,11 +2,13 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import asyncio
-from typing import Any, Dict, List, Optional, Callable
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from typing import Any
+
+from vllm.logger import init_logger
 
 from .request_queue import QueuedRequest
-from vllm.logger import init_logger
 
 logger = init_logger(__name__)
 
@@ -21,7 +23,7 @@ class BatchProcessor:
         self,
         engine: Any,
         max_concurrent_batches: int = 4,
-        executor: Optional[ThreadPoolExecutor] = None,
+        executor: ThreadPoolExecutor | None = None,
     ):
         self.engine = engine
         self.max_concurrent_batches = max_concurrent_batches
@@ -30,8 +32,8 @@ class BatchProcessor:
 
     async def process_batch(
         self,
-        batch: List[QueuedRequest],
-        result_callback: Optional[Callable[[str, Any], None]] = None,
+        batch: list[QueuedRequest],
+        result_callback: Callable[[str, Any], None] | None = None,
     ) -> None:
         """Process a batch of requests.
 
@@ -46,8 +48,6 @@ class BatchProcessor:
             try:
                 # Extract request data
                 request_ids = [req.request_id for req in batch]
-                prompts = [req.data.get("prompt") for req in batch]
-                sampling_params_list = [req.data.get("sampling_params", {}) for req in batch]
 
                 logger.info(f"Processing batch of {len(batch)} requests: {request_ids}")
 
@@ -81,7 +81,7 @@ class BatchProcessor:
                     if result_callback:
                         result_callback(req.request_id, {"error": str(e)})
 
-    async def _process_single_request(self, request_id: str, request_data: Dict[str, Any]) -> Any:
+    async def _process_single_request(self, request_id: str, request_data: dict[str, Any]) -> Any:
         """Process a single request using the engine."""
         # Extract request parameters
         prompt = request_data.get("prompt")
