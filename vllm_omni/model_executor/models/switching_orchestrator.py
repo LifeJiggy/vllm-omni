@@ -7,17 +7,14 @@ during model switches.
 """
 
 import asyncio
-import logging
 import time
-from typing import Any, Dict, List, Optional, Tuple
 from dataclasses import dataclass, field
+from typing import Any
+
+from vllm.logger import init_logger
 
 from vllm_omni.model_executor.models.model_switcher import ModelSwitcher
-from vllm_omni.model_executor.models.switching_strategies import (
-    SwitchingStrategyType,
-    SwitchOperation
-)
-from vllm.logger import init_logger
+from vllm_omni.model_executor.models.switching_strategies import SwitchingStrategyType, SwitchOperation
 
 logger = init_logger(__name__)
 
@@ -25,6 +22,7 @@ logger = init_logger(__name__)
 @dataclass
 class SwitchingState:
     """Tracks the state of an active model switch."""
+
     model_id: str
     operation: SwitchOperation
     strategy_instance: Any  # The actual strategy instance
@@ -62,17 +60,19 @@ class SwitchingOrchestrator:
             model_switcher: The underlying model switcher instance
         """
         self.model_switcher = model_switcher
-        self.active_switches: Dict[str, SwitchingState] = {}
+        self.active_switches: dict[str, SwitchingState] = {}
         self._lock = asyncio.Lock()
 
         logger.info("Initialized SwitchingOrchestrator")
 
-    async def start_switch(self,
-                          model_id: str,
-                          target_version: str,
-                          strategy_type: SwitchingStrategyType = SwitchingStrategyType.IMMEDIATE,
-                          strategy_config: Optional[Dict[str, Any]] = None,
-                          metadata: Optional[Dict[str, Any]] = None) -> str:
+    async def start_switch(
+        self,
+        model_id: str,
+        target_version: str,
+        strategy_type: SwitchingStrategyType = SwitchingStrategyType.IMMEDIATE,
+        strategy_config: dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> str:
         """
         Start a model switching operation.
 
@@ -100,7 +100,7 @@ class SwitchingOrchestrator:
                 target_version=target_version,
                 strategy_type=strategy_type,
                 strategy_config=strategy_config,
-                metadata=metadata
+                metadata=metadata,
             )
 
             if result.success:
@@ -112,18 +112,17 @@ class SwitchingOrchestrator:
                     to_version=result.to_version,
                     strategy_type=strategy_type,
                     strategy_config=strategy_config or {},
-                    metadata=metadata or {}
+                    metadata=metadata or {},
                 )
                 operation.start()
 
                 # Import here to avoid circular imports
                 from vllm_omni.model_executor.models.switching_strategies import create_strategy
+
                 strategy_instance = create_strategy(strategy_type, strategy_config or {})
 
                 switching_state = SwitchingState(
-                    model_id=model_id,
-                    operation=operation,
-                    strategy_instance=strategy_instance
+                    model_id=model_id, operation=operation, strategy_instance=strategy_instance
                 )
 
                 self.active_switches[model_id] = switching_state
@@ -133,7 +132,7 @@ class SwitchingOrchestrator:
 
             return result.operation_id
 
-    def get_routing_decision(self, model_id: str, request_id: str) -> Tuple[str, Optional[SwitchingState]]:
+    def get_routing_decision(self, model_id: str, request_id: str) -> tuple[str, SwitchingState | None]:
         """
         Determine which model version should handle a request.
 
@@ -211,7 +210,7 @@ class SwitchingOrchestrator:
 
             return False
 
-    def get_active_switches(self) -> List[Dict[str, Any]]:
+    def get_active_switches(self) -> list[dict[str, Any]]:
         """
         Get information about all active switches.
 
@@ -221,16 +220,18 @@ class SwitchingOrchestrator:
         active_info = []
         for model_id, state in self.active_switches.items():
             if state.is_active:
-                active_info.append({
-                    "model_id": model_id,
-                    "operation_id": state.operation.operation_id,
-                    "from_version": state.source_version,
-                    "to_version": state.target_version,
-                    "strategy": state.operation.strategy_type.value,
-                    "progress": state.operation.progress,
-                    "start_time": state.start_time,
-                    "status": state.operation.status
-                })
+                active_info.append(
+                    {
+                        "model_id": model_id,
+                        "operation_id": state.operation.operation_id,
+                        "from_version": state.source_version,
+                        "to_version": state.target_version,
+                        "strategy": state.operation.strategy_type.value,
+                        "progress": state.operation.progress,
+                        "start_time": state.start_time,
+                        "status": state.operation.status,
+                    }
+                )
         return active_info
 
     async def abort_switch(self, model_id: str) -> bool:
@@ -256,7 +257,7 @@ class SwitchingOrchestrator:
 
             return success
 
-    def get_switch_statistics(self) -> Dict[str, Any]:
+    def get_switch_statistics(self) -> dict[str, Any]:
         """
         Get statistics about switching operations.
 
@@ -266,7 +267,7 @@ class SwitchingOrchestrator:
         stats = {
             "active_switches": len([s for s in self.active_switches.values() if s.is_active]),
             "total_switches": len(self.active_switches),
-            "switches_by_strategy": {}
+            "switches_by_strategy": {},
         }
 
         for state in self.active_switches.values():

@@ -9,16 +9,20 @@ with the vLLM-Omni inference engine for seamless model transitions.
 import asyncio
 import logging
 import time
-from typing import Optional, Dict, Any
+from typing import Any
 
 # vLLM-Omni imports
 from vllm_omni.config.model import OmniModelConfig
 from vllm_omni.model_executor.models import (
-    DynamicModelRegistry, ModelSwitcher, HealthMonitor,
-    TransitionManager, ModelCache, create_model_switching_api
+    DynamicModelRegistry,
+    HealthMonitor,
+    ModelCache,
+    ModelSwitcher,
+    TransitionManager,
 )
 from vllm_omni.model_executor.models.config import ModelSwitchingConfig
 from vllm_omni.model_executor.models.switching_strategies import SwitchingStrategyType
+
 
 # Mock vLLM engine for demonstration
 class MockVLLEngine:
@@ -43,7 +47,7 @@ class MockVLLEngine:
         return {
             "request_id": request.get("id", self.request_count),
             "result": f"Processed by {request.get('model_id', 'unknown')}",
-            "latency_ms": 10
+            "latency_ms": 10,
         }
 
 
@@ -55,27 +59,27 @@ class SwitchingEnabledEngine(MockVLLEngine):
     the inference engine's request processing pipeline.
     """
 
-    def __init__(self, switching_config: Optional[ModelSwitchingConfig] = None):
+    def __init__(self, switching_config: ModelSwitchingConfig | None = None):
         super().__init__()
 
         # Initialize switching components
         self.config = switching_config or ModelSwitchingConfig()
 
         # Create base registry (mock for this example)
-        base_registry = type('MockRegistry', (), {
-            'is_text_generation_model': lambda self, arch, config: (True, True)
-        })()
+        base_registry = type(
+            "MockRegistry", (), {"is_text_generation_model": lambda self, arch, config: (True, True)}
+        )()
 
         # Initialize switching system
         self.registry = DynamicModelRegistry(
             base_registry=base_registry,
             max_cached_models=self.config.max_cached_models,
-            model_ttl_seconds=self.config.model_ttl_seconds
+            model_ttl_seconds=self.config.model_ttl_seconds,
         )
 
         self.cache = ModelCache(
             max_cache_size=self.config.max_cache_size,
-            memory_manager=None  # Simplified for demo
+            memory_manager=None,  # Simplified for demo
         )
 
         self.transition_manager = TransitionManager()
@@ -85,7 +89,7 @@ class SwitchingEnabledEngine(MockVLLEngine):
             registry=self.registry,
             cache=self.cache,
             transition_manager=self.transition_manager,
-            max_concurrent_switches=self.config.max_concurrent_switches
+            max_concurrent_switches=self.config.max_concurrent_switches,
         )
 
         # Start background tasks
@@ -99,8 +103,9 @@ class SwitchingEnabledEngine(MockVLLEngine):
         # with the asyncio event loop
         pass
 
-    def register_switching_model(self, model_config: OmniModelConfig, version: str,
-                                model_instance=None, metadata: Optional[Dict[str, Any]] = None):
+    def register_switching_model(
+        self, model_config: OmniModelConfig, version: str, model_instance=None, metadata: dict[str, Any] | None = None
+    ):
         """
         Register a model version for switching.
 
@@ -124,9 +129,13 @@ class SwitchingEnabledEngine(MockVLLEngine):
         print(f"Registered switching model: {model_id} v{version}")
         return model_id
 
-    def switch_model(self, model_id: str, target_version: str,
-                    strategy: SwitchingStrategyType = SwitchingStrategyType.IMMEDIATE,
-                    strategy_config: Optional[Dict[str, Any]] = None):
+    def switch_model(
+        self,
+        model_id: str,
+        target_version: str,
+        strategy: SwitchingStrategyType = SwitchingStrategyType.IMMEDIATE,
+        strategy_config: dict[str, Any] | None = None,
+    ):
         """
         Initiate a model switch operation.
 
@@ -136,12 +145,13 @@ class SwitchingEnabledEngine(MockVLLEngine):
             strategy: Switching strategy
             strategy_config: Strategy configuration
         """
+
         async def _switch():
             result = await self.switcher.switch_model(
                 model_id=model_id,
                 target_version=target_version,
                 strategy_type=strategy,
-                strategy_config=strategy_config
+                strategy_config=strategy_config,
             )
             return result
 
@@ -157,7 +167,7 @@ class SwitchingEnabledEngine(MockVLLEngine):
             "model_id": model_id,
             "from_version": "previous",
             "to_version": target_version,
-            "strategy": strategy.value
+            "strategy": strategy.value,
         }
 
     def process_request(self, request):
@@ -175,7 +185,9 @@ class SwitchingEnabledEngine(MockVLLEngine):
 
         if assigned_model:
             # Route to specific model instance during transition
-            print(f"Routing request {request_id} to transition model: {assigned_model.model_id} v{assigned_model.version}")
+            print(
+                f"Routing request {request_id} to transition model: {assigned_model.model_id} v{assigned_model.version}"
+            )
             result = super().process_request(request)
             result["assigned_model"] = f"{assigned_model.model_id} v{assigned_model.version}"
         else:
@@ -202,7 +214,7 @@ class SwitchingEnabledEngine(MockVLLEngine):
             "cache": self.cache.get_cache_stats(),
             "switcher": self.switcher.get_switcher_stats(),
             "health": self.health_monitor.get_monitor_stats(),
-            "transitions": self.transition_manager.get_transition_stats()
+            "transitions": self.transition_manager.get_transition_stats(),
         }
 
 
@@ -219,15 +231,11 @@ async def demo_model_switching():
     print("\n📝 Registering model versions...")
 
     config_v1 = OmniModelConfig(
-        model="Qwen/Qwen2.5-Omni-7B",
-        model_arch="Qwen2_5OmniForConditionalGeneration",
-        model_stage="thinker"
+        model="Qwen/Qwen2.5-Omni-7B", model_arch="Qwen2_5OmniForConditionalGeneration", model_stage="thinker"
     )
 
     config_v2 = OmniModelConfig(
-        model="Qwen/Qwen2.5-Omni-7B-v2",
-        model_arch="Qwen2_5OmniForConditionalGeneration",
-        model_stage="thinker"
+        model="Qwen/Qwen2.5-Omni-7B-v2", model_arch="Qwen2_5OmniForConditionalGeneration", model_stage="thinker"
     )
 
     # Register versions
@@ -239,13 +247,9 @@ async def demo_model_switching():
     # Process some requests
     print("\n🔄 Processing requests with v1.0...")
     for i in range(5):
-        request = {
-            "id": f"req_{i+1}",
-            "model_id": model_id,
-            "prompt": f"Test request {i+1}"
-        }
+        request = {"id": f"req_{i + 1}", "model_id": model_id, "prompt": f"Test request {i + 1}"}
         result = engine.process_request(request)
-        print(f"  Request {i+1}: {result['result']}")
+        print(f"  Request {i + 1}: {result['result']}")
 
     # Initiate model switch
     print("\n🔄 Switching to v2.0 with gradual rollout...")
@@ -253,7 +257,7 @@ async def demo_model_switching():
         model_id=model_id,
         target_version="v2.0",
         strategy=SwitchingStrategyType.GRADUAL,
-        strategy_config={"duration_minutes": 1, "steps": 3}
+        strategy_config={"duration_minutes": 1, "steps": 3},
     )
 
     print(f"Switch initiated: {switch_result['success']}")
@@ -261,14 +265,10 @@ async def demo_model_switching():
     # Process requests during transition
     print("\n🔄 Processing requests during transition...")
     for i in range(5, 10):
-        request = {
-            "id": f"req_{i+1}",
-            "model_id": model_id,
-            "prompt": f"Transition request {i+1}"
-        }
+        request = {"id": f"req_{i + 1}", "model_id": model_id, "prompt": f"Transition request {i + 1}"}
         result = engine.process_request(request)
         assigned = result.get("assigned_model", "normal routing")
-        print(f"  Request {i+1}: {result['result']} (routed: {assigned})")
+        print(f"  Request {i + 1}: {result['result']} (routed: {assigned})")
 
     # Check final stats
     print("\n📊 Final Statistics:")
@@ -288,9 +288,7 @@ async def demo_api_server():
     print("=" * 50)
 
     # Initialize components
-    base_registry = type('MockRegistry', (), {
-        'is_text_generation_model': lambda self, arch, config: (True, True)
-    })()
+    base_registry = type("MockRegistry", (), {"is_text_generation_model": lambda self, arch, config: (True, True)})()
 
     registry = DynamicModelRegistry(base_registry)
     cache = ModelCache(max_cache_size=3)
@@ -301,7 +299,8 @@ async def demo_api_server():
 
     # Create API
     from vllm_omni.model_executor.models.api import ModelSwitchingAPI
-    api = ModelSwitchingAPI(registry, switcher, health_monitor)
+
+    _api = ModelSwitchingAPI(registry, switcher, health_monitor)
 
     print("API endpoints available:")
     print("  POST /models - Register new models")

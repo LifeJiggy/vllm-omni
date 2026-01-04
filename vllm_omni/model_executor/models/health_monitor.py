@@ -6,17 +6,16 @@ including performance metrics collection, error rate tracking, and automatic ale
 """
 
 import asyncio
-import logging
 import statistics
-import time
 import threading
+import time
 from collections import deque
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Callable, Set
-from concurrent.futures import ThreadPoolExecutor
+from typing import Any
 
-from vllm_omni.model_executor.models.dynamic_registry import ModelInstance
 from vllm.logger import init_logger
 
 logger = init_logger(__name__)
@@ -24,6 +23,7 @@ logger = init_logger(__name__)
 
 class HealthStatus(Enum):
     """Health status levels for model instances."""
+
     HEALTHY = "healthy"
     DEGRADED = "degraded"
     UNHEALTHY = "unhealthy"
@@ -33,6 +33,7 @@ class HealthStatus(Enum):
 
 class AlertSeverity(Enum):
     """Alert severity levels."""
+
     INFO = "info"
     WARNING = "warning"
     ERROR = "error"
@@ -42,6 +43,7 @@ class AlertSeverity(Enum):
 @dataclass
 class HealthMetrics:
     """Health metrics for a model instance."""
+
     model_id: str
     version: str
     timestamp: float = field(default_factory=time.time)
@@ -51,7 +53,7 @@ class HealthMetrics:
     error_count: int = 0
     total_latency_ms: float = 0.0
     max_latency_ms: float = 0.0
-    min_latency_ms: float = float('inf')
+    min_latency_ms: float = float("inf")
 
     # Resource metrics
     memory_usage_mb: float = 0.0
@@ -59,7 +61,7 @@ class HealthMetrics:
     gpu_memory_mb: float = 0.0
 
     # Custom metrics
-    custom_metrics: Dict[str, Any] = field(default_factory=dict)
+    custom_metrics: dict[str, Any] = field(default_factory=dict)
 
     @property
     def error_rate(self) -> float:
@@ -81,6 +83,7 @@ class HealthMetrics:
 @dataclass
 class Alert:
     """Alert for health issues."""
+
     alert_id: str
     model_id: str
     version: str
@@ -89,8 +92,8 @@ class Alert:
     message: str
     timestamp: float = field(default_factory=time.time)
     resolved: bool = False
-    resolved_at: Optional[float] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    resolved_at: float | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def resolve(self):
         """Mark alert as resolved."""
@@ -101,7 +104,7 @@ class Alert:
 class AlertSystem:
     """Alert system for health monitoring."""
 
-    def __init__(self, alert_handlers: Optional[List[Callable[[Alert], None]]] = None):
+    def __init__(self, alert_handlers: list[Callable[[Alert], None]] | None = None):
         """
         Initialize alert system.
 
@@ -109,8 +112,8 @@ class AlertSystem:
             alert_handlers: List of functions to call when alerts are triggered
         """
         self.alert_handlers = alert_handlers or []
-        self.active_alerts: Dict[str, Alert] = {}
-        self.resolved_alerts: List[Alert] = []
+        self.active_alerts: dict[str, Alert] = {}
+        self.resolved_alerts: list[Alert] = []
         self.max_resolved_history = 1000
 
     def trigger_alert(self, alert: Alert):
@@ -160,7 +163,7 @@ class AlertSystem:
 
             logger.info(f"Alert resolved: {alert_id}")
 
-    def get_active_alerts(self, model_id: Optional[str] = None) -> List[Alert]:
+    def get_active_alerts(self, model_id: str | None = None) -> list[Alert]:
         """
         Get active alerts.
 
@@ -175,7 +178,7 @@ class AlertSystem:
             alerts = [a for a in alerts if a.model_id == model_id]
         return alerts
 
-    def get_alert_stats(self) -> Dict[str, Any]:
+    def get_alert_stats(self) -> dict[str, Any]:
         """Get alert statistics."""
         severity_counts = {}
         for severity in AlertSeverity:
@@ -187,7 +190,7 @@ class AlertSystem:
         return {
             "active_alerts": len(self.active_alerts),
             "resolved_alerts": len(self.resolved_alerts),
-            "alerts_by_severity": severity_counts
+            "alerts_by_severity": severity_counts,
         }
 
 
@@ -198,11 +201,13 @@ class HealthMonitor:
     This class monitors model performance, detects health issues, and triggers alerts.
     """
 
-    def __init__(self,
-                 alert_system: Optional[AlertSystem] = None,
-                 monitoring_interval: float = 30.0,
-                 metrics_history_size: int = 100,
-                 health_check_timeout: float = 10.0):
+    def __init__(
+        self,
+        alert_system: AlertSystem | None = None,
+        monitoring_interval: float = 30.0,
+        metrics_history_size: int = 100,
+        health_check_timeout: float = 10.0,
+    ):
         """
         Initialize health monitor.
 
@@ -218,26 +223,26 @@ class HealthMonitor:
         self.health_check_timeout = health_check_timeout
 
         # Metrics storage
-        self.metrics_history: Dict[str, deque] = {}  # model_key -> deque of HealthMetrics
-        self.current_metrics: Dict[str, HealthMetrics] = {}  # model_key -> current HealthMetrics
+        self.metrics_history: dict[str, deque] = {}  # model_key -> deque of HealthMetrics
+        self.current_metrics: dict[str, HealthMetrics] = {}  # model_key -> current HealthMetrics
 
         # Health thresholds
         self.thresholds = {
-            "error_rate_warning": 0.05,    # 5%
-            "error_rate_critical": 0.10,   # 10%
-            "latency_p95_warning": 5000,   # 5 seconds
-            "latency_p95_critical": 10000, # 10 seconds
-            "memory_usage_warning": 0.8,   # 80%
-            "memory_usage_critical": 0.95, # 95%
+            "error_rate_warning": 0.05,  # 5%
+            "error_rate_critical": 0.10,  # 10%
+            "latency_p95_warning": 5000,  # 5 seconds
+            "latency_p95_critical": 10000,  # 10 seconds
+            "memory_usage_warning": 0.8,  # 80%
+            "memory_usage_critical": 0.95,  # 95%
         }
 
         # Threading
         self._lock = threading.RLock()
-        self._monitoring_task: Optional[asyncio.Task] = None
+        self._monitoring_task: asyncio.Task | None = None
         self._executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="health-monitor")
 
         # Health status cache
-        self.health_status_cache: Dict[str, tuple] = {}  # model_key -> (status, timestamp)
+        self.health_status_cache: dict[str, tuple] = {}  # model_key -> (status, timestamp)
 
         logger.info(f"Initialized HealthMonitor with monitoring_interval={monitoring_interval}s")
 
@@ -285,15 +290,17 @@ class HealthMonitor:
                     avg_error_rate = statistics.mean(error_rates)
                     if avg_error_rate > self.thresholds["error_rate_critical"]:
                         self._trigger_health_alert(
-                            model_key, AlertSeverity.CRITICAL,
+                            model_key,
+                            AlertSeverity.CRITICAL,
                             "High Error Rate",
-                            f"Error rate is {avg_error_rate:.2%}, above critical threshold"
+                            f"Error rate is {avg_error_rate:.2%}, above critical threshold",
                         )
                     elif avg_error_rate > self.thresholds["error_rate_warning"]:
                         self._trigger_health_alert(
-                            model_key, AlertSeverity.WARNING,
+                            model_key,
+                            AlertSeverity.WARNING,
                             "Elevated Error Rate",
-                            f"Error rate is {avg_error_rate:.2%}, above warning threshold"
+                            f"Error rate is {avg_error_rate:.2%}, above warning threshold",
                         )
 
                 # Check latency trends
@@ -302,19 +309,20 @@ class HealthMonitor:
                     p95_latency = statistics.quantiles(latencies, n=20)[18]  # 95th percentile
                     if p95_latency > self.thresholds["latency_p95_critical"]:
                         self._trigger_health_alert(
-                            model_key, AlertSeverity.CRITICAL,
+                            model_key,
+                            AlertSeverity.CRITICAL,
                             "High Latency",
-                            f"P95 latency is {p95_latency:.0f}ms, above critical threshold"
+                            f"P95 latency is {p95_latency:.0f}ms, above critical threshold",
                         )
                     elif p95_latency > self.thresholds["latency_p95_warning"]:
                         self._trigger_health_alert(
-                            model_key, AlertSeverity.WARNING,
+                            model_key,
+                            AlertSeverity.WARNING,
                             "Elevated Latency",
-                            f"P95 latency is {p95_latency:.0f}ms, above warning threshold"
+                            f"P95 latency is {p95_latency:.0f}ms, above warning threshold",
                         )
 
-    def _trigger_health_alert(self, model_key: str, severity: AlertSeverity,
-                             title: str, message: str):
+    def _trigger_health_alert(self, model_key: str, severity: AlertSeverity, title: str, message: str):
         """
         Trigger a health alert.
 
@@ -324,7 +332,7 @@ class HealthMonitor:
             title: Alert title
             message: Alert message
         """
-        model_id, version = model_key.split('_', 1)
+        model_id, version = model_key.split("_", 1)
         alert_id = f"health_{model_key}_{title.lower().replace(' ', '_')}"
 
         alert = Alert(
@@ -334,7 +342,7 @@ class HealthMonitor:
             severity=severity,
             title=title,
             message=message,
-            metadata={"model_key": model_key}
+            metadata={"model_key": model_key},
         )
 
         self.alert_system.trigger_alert(alert)
@@ -351,11 +359,8 @@ class HealthMonitor:
         with self._lock:
             # Initialize metrics if needed
             if model_key not in self.current_metrics:
-                model_id, version = model_key.split('_', 1)
-                self.current_metrics[model_key] = HealthMetrics(
-                    model_id=model_id,
-                    version=version
-                )
+                model_id, version = model_key.split("_", 1)
+                self.current_metrics[model_key] = HealthMetrics(model_id=model_id, version=version)
 
             if model_key not in self.metrics_history:
                 self.metrics_history[model_key] = deque(maxlen=self.metrics_history_size)
@@ -371,8 +376,7 @@ class HealthMonitor:
             if error:
                 metrics.error_count += 1
 
-    def update_resource_metrics(self, model_key: str, memory_mb: float,
-                               cpu_percent: float, gpu_memory_mb: float):
+    def update_resource_metrics(self, model_key: str, memory_mb: float, cpu_percent: float, gpu_memory_mb: float):
         """
         Update resource usage metrics.
 
@@ -413,7 +417,7 @@ class HealthMonitor:
                     memory_usage_mb=metrics.memory_usage_mb,
                     cpu_usage_percent=metrics.cpu_usage_percent,
                     gpu_memory_mb=metrics.gpu_memory_mb,
-                    custom_metrics=metrics.custom_metrics.copy()
+                    custom_metrics=metrics.custom_metrics.copy(),
                 )
 
                 # Add to history
@@ -422,10 +426,7 @@ class HealthMonitor:
                 self.metrics_history[model_key].append(history_metrics)
 
                 # Reset current metrics for next snapshot period
-                self.current_metrics[model_key] = HealthMetrics(
-                    model_id=metrics.model_id,
-                    version=metrics.version
-                )
+                self.current_metrics[model_key] = HealthMetrics(model_id=metrics.model_id, version=metrics.version)
 
     def get_health_status(self, model_key: str) -> HealthStatus:
         """
@@ -498,7 +499,7 @@ class HealthMonitor:
 
         return HealthStatus.HEALTHY
 
-    def get_model_metrics(self, model_key: str, include_history: bool = False) -> Optional[Dict[str, Any]]:
+    def get_model_metrics(self, model_key: str, include_history: bool = False) -> dict[str, Any] | None:
         """
         Get metrics for a model.
 
@@ -527,10 +528,10 @@ class HealthMonitor:
                     "memory_usage_mb": current.memory_usage_mb,
                     "cpu_usage_percent": current.cpu_usage_percent,
                     "gpu_memory_mb": current.gpu_memory_mb,
-                    "custom_metrics": current.custom_metrics
+                    "custom_metrics": current.custom_metrics,
                 },
                 "health_status": self.get_health_status(model_key).value,
-                "history_size": len(self.metrics_history.get(model_key, []))
+                "history_size": len(self.metrics_history.get(model_key, [])),
             }
 
             if include_history:
@@ -541,14 +542,14 @@ class HealthMonitor:
                         "request_count": m.request_count,
                         "error_rate": m.error_rate,
                         "average_latency_ms": m.average_latency_ms,
-                        "memory_usage_mb": m.memory_usage_mb
+                        "memory_usage_mb": m.memory_usage_mb,
                     }
                     for m in history
                 ]
 
             return result
 
-    def get_monitor_stats(self) -> Dict[str, Any]:
+    def get_monitor_stats(self) -> dict[str, Any]:
         """
         Get monitoring statistics.
 
@@ -566,10 +567,10 @@ class HealthMonitor:
                 "overall_error_rate": total_errors / max(total_requests, 1),
                 "alert_stats": self.alert_system.get_alert_stats(),
                 "monitoring_interval": self.monitoring_interval,
-                "metrics_history_size": self.metrics_history_size
+                "metrics_history_size": self.metrics_history_size,
             }
 
-    def update_thresholds(self, new_thresholds: Dict[str, float]):
+    def update_thresholds(self, new_thresholds: dict[str, float]):
         """
         Update health thresholds.
 
@@ -583,5 +584,5 @@ class HealthMonitor:
     def __del__(self):
         """Cleanup on destruction."""
         self.stop_monitoring()
-        if hasattr(self, '_executor'):
+        if hasattr(self, "_executor"):
             self._executor.shutdown(wait=False)

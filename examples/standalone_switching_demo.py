@@ -7,20 +7,19 @@ without requiring the full vLLM-Omni installation.
 """
 
 import asyncio
-import time
-import sys
 import os
+import sys
 
 # Add the current directory to Python path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Import our switching components
 from vllm_omni.model_executor.models.dynamic_registry import DynamicModelRegistry, ModelInstance
-from vllm_omni.model_executor.models.model_cache import ModelCache, MemoryManager
-from vllm_omni.model_executor.models.transition_manager import TransitionManager
-from vllm_omni.model_executor.models.model_switcher import ModelSwitcher
 from vllm_omni.model_executor.models.health_monitor import HealthMonitor
+from vllm_omni.model_executor.models.model_cache import ModelCache
+from vllm_omni.model_executor.models.model_switcher import ModelSwitcher
 from vllm_omni.model_executor.models.switching_strategies import SwitchingStrategyType
+from vllm_omni.model_executor.models.transition_manager import TransitionManager
 
 
 # Mock OmniModelConfig for demo
@@ -63,15 +62,11 @@ async def demo_basic_switching():
     print("\n📝 Registering model versions...")
 
     config_v1 = MockOmniModelConfig(
-        model="Qwen/Qwen2.5-Omni-7B",
-        model_arch="Qwen2_5OmniForConditionalGeneration",
-        model_stage="thinker"
+        model="Qwen/Qwen2.5-Omni-7B", model_arch="Qwen2_5OmniForConditionalGeneration", model_stage="thinker"
     )
 
     config_v2 = MockOmniModelConfig(
-        model="Qwen/Qwen2.5-Omni-7B-v2",
-        model_arch="Qwen2_5OmniForConditionalGeneration",
-        model_stage="thinker"
+        model="Qwen/Qwen2.5-Omni-7B-v2", model_arch="Qwen2_5OmniForConditionalGeneration", model_stage="thinker"
     )
 
     # Register versions
@@ -90,14 +85,12 @@ async def demo_basic_switching():
         model_id=version.model_id,
         version=version.version,
         config=version.config,
-        model=create_mock_model(version.model_id, version.version)
+        model=create_mock_model(version.model_id, version.version),
     )
 
     try:
         result = await switcher.switch_model(
-            model_id=model_id,
-            target_version="v2.0",
-            strategy_type=SwitchingStrategyType.IMMEDIATE
+            model_id=model_id, target_version="v2.0", strategy_type=SwitchingStrategyType.IMMEDIATE
         )
 
         print(f"✅ Switch result: {result.success}")
@@ -177,7 +170,7 @@ async def demo_transition_management():
     print("📨 Processing requests during transition...")
 
     for i in range(5):
-        request_id = f"req_{i+1}"
+        request_id = f"req_{i + 1}"
         assigned_model = transition_manager.handle_request_routing("test_model", request_id)
 
         if assigned_model:
@@ -203,7 +196,7 @@ async def demo_switching_strategies():
     print("=" * 30)
 
     from vllm_omni.model_executor.models.switching_strategies import (
-        create_strategy, ImmediateSwitch, GradualRollout, ABTestSwitch
+        create_strategy,
     )
 
     # Test strategy creation
@@ -263,6 +256,7 @@ async def main():
     except Exception as e:
         print(f"\n❌ Demo failed with error: {e}")
         import traceback
+
         traceback.print_exc()
 
 

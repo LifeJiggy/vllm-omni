@@ -5,21 +5,20 @@ This module provides a wrapper around the Omni class that adds model switching c
 enabling seamless traffic routing during model switches.
 """
 
-import asyncio
-import logging
-from typing import Any, Dict, List, Optional, Generator
-from vllm.inputs import PromptType
+from collections.abc import Generator
+from typing import Any
+
 from vllm.logger import init_logger
 
 from vllm_omni.entrypoints.omni import Omni
-from vllm_omni.outputs import OmniRequestOutput
-from vllm_omni.model_executor.models.switching_orchestrator import SwitchingOrchestrator
-from vllm_omni.model_executor.models.request_router import RequestRouter, RoutingDecision
-from vllm_omni.model_executor.models.model_switcher import ModelSwitcher
 from vllm_omni.model_executor.models.dynamic_registry import DynamicModelRegistry
 from vllm_omni.model_executor.models.model_cache import ModelCache
-from vllm_omni.model_executor.models.transition_manager import TransitionManager
+from vllm_omni.model_executor.models.model_switcher import ModelSwitcher
+from vllm_omni.model_executor.models.request_router import RequestRouter
+from vllm_omni.model_executor.models.switching_orchestrator import SwitchingOrchestrator
 from vllm_omni.model_executor.models.switching_strategies import SwitchingStrategyType
+from vllm_omni.model_executor.models.transition_manager import TransitionManager
+from vllm_omni.outputs import OmniRequestOutput
 
 logger = init_logger(__name__)
 
@@ -32,11 +31,9 @@ class OmniWithSwitching:
     allowing requests to be routed to appropriate model versions during switches.
     """
 
-    def __init__(self,
-                 model: str,
-                 enable_switching: bool = True,
-                 switching_config: Optional[Dict[str, Any]] = None,
-                 **kwargs):
+    def __init__(
+        self, model: str, enable_switching: bool = True, switching_config: dict[str, Any] | None = None, **kwargs
+    ):
         """
         Initialize Omni with switching capabilities.
 
@@ -60,7 +57,7 @@ class OmniWithSwitching:
             self.request_router = None
             logger.info(f"Initialized OmniWithSwitching for model {model} with switching disabled")
 
-    def _initialize_switching_components(self, config: Dict[str, Any]):
+    def _initialize_switching_components(self, config: dict[str, Any]):
         """Initialize switching components."""
         # Create switching infrastructure
         # Note: In a real implementation, these would be shared across multiple Omni instances
@@ -72,7 +69,7 @@ class OmniWithSwitching:
             registry=registry,
             cache=cache,
             transition_manager=transition_manager,
-            max_concurrent_switches=config.get("max_concurrent_switches", 3)
+            max_concurrent_switches=config.get("max_concurrent_switches", 3),
         )
 
         self.switching_orchestrator = SwitchingOrchestrator(model_switcher)
@@ -80,6 +77,7 @@ class OmniWithSwitching:
 
         # Set as global router for convenience
         from vllm_omni.model_executor.models.request_router import set_request_router
+
         set_request_router(self.request_router)
 
     def generate(self, *args, **kwargs) -> Generator[OmniRequestOutput, None, None]:
@@ -107,9 +105,7 @@ class OmniWithSwitching:
         # Route requests based on switching state
         if isinstance(prompts, (list, tuple)):
             # Batch request routing
-            routing_decisions = self.request_router.route_batch_request(
-                self.model, [{"prompt": p} for p in prompts]
-            )
+            routing_decisions = self.request_router.route_batch_request(self.model, [{"prompt": p} for p in prompts])
 
             # Group by target version
             version_groups = {}
@@ -122,27 +118,31 @@ class OmniWithSwitching:
             # Process each version group
             for version, requests in version_groups.items():
                 group_prompts = [req[1] for req in requests]
-                group_decisions = [req[2] for req in requests]
+                _group_decisions = [req[2] for req in requests]
 
                 # Generate for this version
-                outputs = list(self.omni.generate(
-                    prompts=group_prompts,
-                    sampling_params_list=sampling_params_list,
-                    **{k: v for k, v in kwargs.items() if k not in ["prompts", "prompt"]}
-                ))
+                outputs = list(
+                    self.omni.generate(
+                        prompts=group_prompts,
+                        sampling_params_list=sampling_params_list,
+                        **{k: v for k, v in kwargs.items() if k not in ["prompts", "prompt"]},
+                    )
+                )
 
                 # Yield outputs with routing metadata
                 for i, output in enumerate(outputs):
                     original_idx, _, decision = requests[i]
                     # Add routing metadata to output
-                    if hasattr(output, 'metadata'):
-                        output.metadata.update({
-                            "routing_decision": {
-                                "target_version": decision.target_version,
-                                "is_switching": decision.is_switching,
-                                "switching_operation_id": decision.switching_operation_id,
+                    if hasattr(output, "metadata"):
+                        output.metadata.update(
+                            {
+                                "routing_decision": {
+                                    "target_version": decision.target_version,
+                                    "is_switching": decision.is_switching,
+                                    "switching_operation_id": decision.switching_operation_id,
+                                }
                             }
-                        })
+                        )
                     yield output
 
         else:
@@ -153,26 +153,30 @@ class OmniWithSwitching:
             outputs = self.omni.generate(
                 prompts=prompts,
                 sampling_params_list=sampling_params_list,
-                **{k: v for k, v in kwargs.items() if k not in ["prompts", "prompt"]}
+                **{k: v for k, v in kwargs.items() if k not in ["prompts", "prompt"]},
             )
 
             # Add routing metadata to outputs
             for output in outputs:
-                if hasattr(output, 'metadata'):
-                    output.metadata.update({
-                        "routing_decision": {
-                            "target_version": decision.target_version,
-                            "is_switching": decision.is_switching,
-                            "switching_operation_id": decision.switching_operation_id,
+                if hasattr(output, "metadata"):
+                    output.metadata.update(
+                        {
+                            "routing_decision": {
+                                "target_version": decision.target_version,
+                                "is_switching": decision.is_switching,
+                                "switching_operation_id": decision.switching_operation_id,
+                            }
                         }
-                    })
+                    )
                 yield output
 
-    async def start_switch(self,
-                          target_version: str,
-                          strategy_type: SwitchingStrategyType = SwitchingStrategyType.IMMEDIATE,
-                          strategy_config: Optional[Dict[str, Any]] = None,
-                          metadata: Optional[Dict[str, Any]] = None) -> str:
+    async def start_switch(
+        self,
+        target_version: str,
+        strategy_type: SwitchingStrategyType = SwitchingStrategyType.IMMEDIATE,
+        strategy_config: dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> str:
         """
         Start a model switching operation.
 
@@ -193,10 +197,10 @@ class OmniWithSwitching:
             target_version=target_version,
             strategy_type=strategy_type,
             strategy_config=strategy_config,
-            metadata=metadata
+            metadata=metadata,
         )
 
-    def get_switching_status(self) -> Dict[str, Any]:
+    def get_switching_status(self) -> dict[str, Any]:
         """
         Get current switching status.
 
@@ -213,7 +217,7 @@ class OmniWithSwitching:
             "enabled": True,
             "active_switches": active_switches,
             "statistics": stats,
-            "routing_stats": self.request_router.get_routing_stats() if self.request_router else {}
+            "routing_stats": self.request_router.get_routing_stats() if self.request_router else {},
         }
 
     async def abort_switch(self, operation_id: str) -> bool:
@@ -231,7 +235,7 @@ class OmniWithSwitching:
 
         return await self.switching_orchestrator.abort_switch(self.model)
 
-    def clear_routing_cache(self, model_id: Optional[str] = None):
+    def clear_routing_cache(self, model_id: str | None = None):
         """
         Clear the routing cache.
 
@@ -248,9 +252,7 @@ class OmniWithSwitching:
 
 
 # Convenience function for creating switching-enabled Omni instances
-def create_omni_with_switching(model: str,
-                               enable_switching: bool = True,
-                               **kwargs) -> OmniWithSwitching:
+def create_omni_with_switching(model: str, enable_switching: bool = True, **kwargs) -> OmniWithSwitching:
     """
     Create an Omni instance with switching capabilities.
 
@@ -262,8 +264,4 @@ def create_omni_with_switching(model: str,
     Returns:
         OmniWithSwitching instance
     """
-    return OmniWithSwitching(
-        model=model,
-        enable_switching=enable_switching,
-        **kwargs
-    )
+    return OmniWithSwitching(model=model, enable_switching=enable_switching, **kwargs)

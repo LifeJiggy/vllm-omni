@@ -6,8 +6,8 @@ This module provides configuration classes and utilities for the model switching
 
 import os
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Any
 from pathlib import Path
+from typing import Any
 
 from vllm.config import config
 
@@ -72,13 +72,13 @@ class ModelSwitchingConfig:
 
     # Security Configuration
     enable_authentication: bool = False
-    api_key: Optional[str] = None
-    allowed_origins: List[str] = field(default_factory=lambda: ["*"])
+    api_key: str | None = None
+    allowed_origins: list[str] = field(default_factory=lambda: ["*"])
 
     # Logging Configuration
     log_level: str = "INFO"
     enable_audit_logging: bool = True
-    audit_log_path: Optional[str] = None
+    audit_log_path: str | None = None
 
     def __post_init__(self):
         """Post-initialization validation and setup."""
@@ -108,7 +108,7 @@ class ModelSwitchingConfig:
             Path(self.audit_log_path).parent.mkdir(parents=True, exist_ok=True)
 
     @classmethod
-    def from_env(cls) -> 'ModelSwitchingConfig':
+    def from_env(cls) -> "ModelSwitchingConfig":
         """Create configuration from environment variables."""
         return cls(
             # Registry settings
@@ -116,31 +116,26 @@ class ModelSwitchingConfig:
             max_cached_models=cls._env_int("VLLM_MODEL_SWITCHING_MAX_CACHED_MODELS", 5),
             model_ttl_seconds=cls._env_int("VLLM_MODEL_SWITCHING_MODEL_TTL_SECONDS", 3600),
             cleanup_interval_seconds=cls._env_int("VLLM_MODEL_SWITCHING_CLEANUP_INTERVAL", 300),
-
             # Cache settings
             enable_model_cache=cls._env_bool("VLLM_MODEL_SWITCHING_ENABLE_CACHE", True),
             max_cache_size=cls._env_int("VLLM_MODEL_SWITCHING_MAX_CACHE_SIZE", 5),
             cache_memory_limit_gb=cls._env_float("VLLM_MODEL_SWITCHING_CACHE_MEMORY_GB", 8.0),
             cache_eviction_interval_seconds=cls._env_float("VLLM_MODEL_SWITCHING_CACHE_EVICTION_INTERVAL", 60.0),
-
             # Switching settings
             max_concurrent_switches=cls._env_int("VLLM_MODEL_SWITCHING_MAX_CONCURRENT", 3),
             default_switch_strategy=cls._env_str("VLLM_MODEL_SWITCHING_DEFAULT_STRATEGY", "immediate"),
             enable_health_checks=cls._env_bool("VLLM_MODEL_SWITCHING_ENABLE_HEALTH_CHECKS", True),
             switch_timeout_seconds=cls._env_int("VLLM_MODEL_SWITCHING_TIMEOUT", 300),
-
             # Transition settings
             enable_transitions=cls._env_bool("VLLM_MODEL_SWITCHING_ENABLE_TRANSITIONS", True),
             max_transition_time_seconds=cls._env_int("VLLM_MODEL_SWITCHING_MAX_TRANSITION_TIME", 300),
             request_timeout_seconds=cls._env_float("VLLM_MODEL_SWITCHING_REQUEST_TIMEOUT", 60.0),
             max_transition_history=cls._env_int("VLLM_MODEL_SWITCHING_MAX_TRANSITION_HISTORY", 100),
-
             # Health monitoring settings
             enable_health_monitoring=cls._env_bool("VLLM_MODEL_SWITCHING_ENABLE_MONITORING", True),
             monitoring_interval_seconds=cls._env_float("VLLM_MODEL_SWITCHING_MONITORING_INTERVAL", 30.0),
             metrics_history_size=cls._env_int("VLLM_MODEL_SWITCHING_METRICS_HISTORY_SIZE", 100),
             health_check_timeout_seconds=cls._env_float("VLLM_MODEL_SWITCHING_HEALTH_CHECK_TIMEOUT", 10.0),
-
             # Health thresholds
             error_rate_warning_threshold=cls._env_float("VLLM_MODEL_SWITCHING_ERROR_RATE_WARNING", 0.05),
             error_rate_critical_threshold=cls._env_float("VLLM_MODEL_SWITCHING_ERROR_RATE_CRITICAL", 0.10),
@@ -148,26 +143,21 @@ class ModelSwitchingConfig:
             latency_p95_critical_threshold=cls._env_float("VLLM_MODEL_SWITCHING_LATENCY_CRITICAL", 10000),
             memory_usage_warning_threshold=cls._env_float("VLLM_MODEL_SWITCHING_MEMORY_WARNING", 0.8),
             memory_usage_critical_threshold=cls._env_float("VLLM_MODEL_SWITCHING_MEMORY_CRITICAL", 0.95),
-
             # Version management settings
             enable_version_management=cls._env_bool("VLLM_MODEL_SWITCHING_ENABLE_VERSION_MGMT", True),
             version_storage_path=cls._env_str("VLLM_MODEL_SWITCHING_VERSION_STORAGE_PATH", "./model_versions"),
             max_version_history=cls._env_int("VLLM_MODEL_SWITCHING_MAX_VERSION_HISTORY", 50),
-
             # Alert settings
             enable_alerts=cls._env_bool("VLLM_MODEL_SWITCHING_ENABLE_ALERTS", True),
             alert_history_size=cls._env_int("VLLM_MODEL_SWITCHING_ALERT_HISTORY_SIZE", 1000),
-
             # API settings
             enable_management_api=cls._env_bool("VLLM_MODEL_SWITCHING_ENABLE_API", True),
             api_host=cls._env_str("VLLM_MODEL_SWITCHING_API_HOST", "localhost"),
             api_port=cls._env_int("VLLM_MODEL_SWITCHING_API_PORT", 8001),
             api_base_path=cls._env_str("VLLM_MODEL_SWITCHING_API_BASE_PATH", "/api/v1/model-switching"),
-
             # Security settings
             enable_authentication=cls._env_bool("VLLM_MODEL_SWITCHING_ENABLE_AUTH", False),
             api_key=cls._env_str("VLLM_MODEL_SWITCHING_API_KEY", None),
-
             # Logging settings
             log_level=cls._env_str("VLLM_MODEL_SWITCHING_LOG_LEVEL", "INFO"),
             enable_audit_logging=cls._env_bool("VLLM_MODEL_SWITCHING_ENABLE_AUDIT_LOG", True),
@@ -180,7 +170,7 @@ class ModelSwitchingConfig:
         value = os.getenv(key)
         if value is None:
             return default
-        return value.lower() in ('true', '1', 'yes', 'on')
+        return value.lower() in ("true", "1", "yes", "on")
 
     @staticmethod
     def _env_int(key: str, default: int) -> int:
@@ -205,11 +195,11 @@ class ModelSwitchingConfig:
             return default
 
     @staticmethod
-    def _env_str(key: str, default: Optional[str]) -> Optional[str]:
+    def _env_str(key: str, default: str | None) -> str | None:
         """Get string value from environment variable."""
         return os.getenv(key, default)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert configuration to dictionary."""
         return {
             "enable_dynamic_registry": self.enable_dynamic_registry,
@@ -259,46 +249,38 @@ class SwitchingStrategyConfig:
     """Configuration for a specific switching strategy."""
 
     strategy_type: str
-    parameters: Dict[str, Any] = field(default_factory=dict)
+    parameters: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def create_immediate(cls) -> 'SwitchingStrategyConfig':
+    def create_immediate(cls) -> "SwitchingStrategyConfig":
         """Create immediate switching configuration."""
         return cls(strategy_type="immediate")
 
     @classmethod
-    def create_gradual(cls, duration_minutes: int = 10, steps: int = 10) -> 'SwitchingStrategyConfig':
+    def create_gradual(cls, duration_minutes: int = 10, steps: int = 10) -> "SwitchingStrategyConfig":
         """Create gradual rollout configuration."""
-        return cls(
-            strategy_type="gradual",
-            parameters={
-                "duration_minutes": duration_minutes,
-                "steps": steps
-            }
-        )
+        return cls(strategy_type="gradual", parameters={"duration_minutes": duration_minutes, "steps": steps})
 
     @classmethod
-    def create_ab_test(cls, traffic_percentage: float = 50, test_duration_hours: int = 24) -> 'SwitchingStrategyConfig':
+    def create_ab_test(cls, traffic_percentage: float = 50, test_duration_hours: int = 24) -> "SwitchingStrategyConfig":
         """Create A/B test configuration."""
         return cls(
             strategy_type="ab_test",
-            parameters={
-                "traffic_percentage": traffic_percentage,
-                "test_duration_hours": test_duration_hours
-            }
+            parameters={"traffic_percentage": traffic_percentage, "test_duration_hours": test_duration_hours},
         )
 
     @classmethod
-    def create_canary(cls, initial_percentage: float = 5, step_percentage: float = 10,
-                     evaluation_period_minutes: int = 15) -> 'SwitchingStrategyConfig':
+    def create_canary(
+        cls, initial_percentage: float = 5, step_percentage: float = 10, evaluation_period_minutes: int = 15
+    ) -> "SwitchingStrategyConfig":
         """Create canary deployment configuration."""
         return cls(
             strategy_type="canary",
             parameters={
                 "initial_percentage": initial_percentage,
                 "step_percentage": step_percentage,
-                "evaluation_period_minutes": evaluation_period_minutes
-            }
+                "evaluation_period_minutes": evaluation_period_minutes,
+            },
         )
 
 
@@ -307,15 +289,15 @@ class ModelRegistrationConfig:
     """Configuration for model registration."""
 
     model_id: str
-    model_config: Dict[str, Any]
+    model_config: dict[str, Any]
     version: str
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
     preload: bool = False
     priority: int = 0
 
 
 # Global configuration instance
-_model_switching_config: Optional[ModelSwitchingConfig] = None
+_model_switching_config: ModelSwitchingConfig | None = None
 
 
 def get_model_switching_config() -> ModelSwitchingConfig:

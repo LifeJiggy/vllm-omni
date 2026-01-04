@@ -5,16 +5,15 @@ This test verifies that the switching orchestrator and request router
 properly integrate with the Omni entry points.
 """
 
-import asyncio
-import pytest
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 
-from vllm_omni.model_executor.models.switching_orchestrator import SwitchingOrchestrator
-from vllm_omni.model_executor.models.request_router import RequestRouter, RoutingDecision
-from vllm_omni.model_executor.models.model_switcher import ModelSwitcher
+import pytest
+
 from vllm_omni.model_executor.models.dynamic_registry import DynamicModelRegistry
 from vllm_omni.model_executor.models.model_cache import ModelCache
-from vllm_omni.model_executor.models.transition_manager import TransitionManager
+from vllm_omni.model_executor.models.model_switcher import ModelSwitcher
+from vllm_omni.model_executor.models.request_router import RequestRouter, RoutingDecision
+from vllm_omni.model_executor.models.switching_orchestrator import SwitchingOrchestrator
 from vllm_omni.model_executor.models.switching_strategies import SwitchingStrategyType
 
 
@@ -51,11 +50,7 @@ class TestSwitchingIntegration:
 
     def test_batch_routing(self, request_router):
         """Test batch request routing."""
-        requests = [
-            {"prompt": "test1"},
-            {"prompt": "test2"},
-            {"prompt": "test3"}
-        ]
+        requests = [{"prompt": "test1"}, {"prompt": "test2"}, {"prompt": "test3"}]
 
         decisions = request_router.route_batch_request("test_model", requests)
 
@@ -81,9 +76,7 @@ class TestSwitchingIntegration:
 
         # Start switch
         operation_id = await switching_orchestrator.start_switch(
-            model_id="test_model",
-            target_version="v2.0",
-            strategy_type=SwitchingStrategyType.IMMEDIATE
+            model_id="test_model", target_version="v2.0", strategy_type=SwitchingStrategyType.IMMEDIATE
         )
 
         assert operation_id == "test_op_123"
@@ -155,7 +148,7 @@ class TestOmniSwitchingIntegration:
         omni.generate = Mock(return_value=iter([]))
         return omni
 
-    @patch('vllm_omni.entrypoints.omni_switching.Omni')
+    @patch("vllm_omni.entrypoints.omni_switching.Omni")
     def test_omni_with_switching_creation(self, mock_omni_class, mock_omni):
         """Test creation of OmniWithSwitching."""
         mock_omni_class.return_value = mock_omni
@@ -170,7 +163,7 @@ class TestOmniSwitchingIntegration:
         assert omni_switching.switching_orchestrator is not None
         assert omni_switching.request_router is not None
 
-    @patch('vllm_omni.entrypoints.omni_switching.Omni')
+    @patch("vllm_omni.entrypoints.omni_switching.Omni")
     def test_omni_without_switching(self, mock_omni_class, mock_omni):
         """Test creation of Omni without switching."""
         mock_omni_class.return_value = mock_omni
@@ -183,7 +176,7 @@ class TestOmniSwitchingIntegration:
         assert omni_switching.switching_orchestrator is None
         assert omni_switching.request_router is None
 
-    @patch('vllm_omni.entrypoints.omni_switching.Omni')
+    @patch("vllm_omni.entrypoints.omni_switching.Omni")
     def test_generate_with_switching(self, mock_omni_class, mock_omni):
         """Test generation with switching enabled."""
         # Mock Omni output
@@ -206,17 +199,14 @@ class TestOmniSwitchingIntegration:
         """Test the convenience function."""
         from vllm_omni.entrypoints.omni_switching import create_omni_with_switching
 
-        with patch('vllm_omni.entrypoints.omni_switching.OmniWithSwitching') as mock_class:
+        with patch("vllm_omni.entrypoints.omni_switching.OmniWithSwitching") as mock_class:
             mock_instance = Mock()
             mock_class.return_value = mock_instance
 
             result = create_omni_with_switching("test_model", enable_switching=True)
 
             assert result == mock_instance
-            mock_class.assert_called_once_with(
-                model="test_model",
-                enable_switching=True
-            )
+            mock_class.assert_called_once_with(model="test_model", enable_switching=True)
 
 
 if __name__ == "__main__":

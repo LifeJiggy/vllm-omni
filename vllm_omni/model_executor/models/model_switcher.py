@@ -6,21 +6,21 @@ coordinating between the registry, cache, transition manager, and switching stra
 """
 
 import asyncio
-import logging
-import time
 import uuid
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
+from typing import Any
 
-from vllm_omni.config.model import OmniModelConfig
-from vllm_omni.model_executor.models.dynamic_registry import DynamicModelRegistry, ModelInstance
-from vllm_omni.model_executor.models.model_cache import ModelCache
-from vllm_omni.model_executor.models.transition_manager import TransitionManager
-from vllm_omni.model_executor.models.switching_strategies import (
-    SwitchingStrategy, SwitchOperation, SwitchingStrategyType, create_strategy
-)
 from vllm.logger import init_logger
+
+from vllm_omni.model_executor.models.dynamic_registry import DynamicModelRegistry
+from vllm_omni.model_executor.models.model_cache import ModelCache
+from vllm_omni.model_executor.models.switching_strategies import (
+    SwitchingStrategyType,
+    SwitchOperation,
+    create_strategy,
+)
+from vllm_omni.model_executor.models.transition_manager import TransitionManager
 
 logger = init_logger(__name__)
 
@@ -28,15 +28,16 @@ logger = init_logger(__name__)
 @dataclass
 class SwitchResult:
     """Result of a model switch operation."""
+
     operation_id: str
     success: bool
     model_id: str
     from_version: str
     to_version: str
     strategy_type: SwitchingStrategyType
-    duration_seconds: Optional[float] = None
-    error_message: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    duration_seconds: float | None = None
+    error_message: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class ModelSwitcher:
@@ -47,11 +48,13 @@ class ModelSwitcher:
     with different strategies and comprehensive monitoring.
     """
 
-    def __init__(self,
-                 registry: DynamicModelRegistry,
-                 cache: ModelCache,
-                 transition_manager: TransitionManager,
-                 max_concurrent_switches: int = 3):
+    def __init__(
+        self,
+        registry: DynamicModelRegistry,
+        cache: ModelCache,
+        transition_manager: TransitionManager,
+        max_concurrent_switches: int = 3,
+    ):
         """
         Initialize the model switcher.
 
@@ -67,8 +70,8 @@ class ModelSwitcher:
         self.max_concurrent_switches = max_concurrent_switches
 
         # Switch operation tracking
-        self.active_operations: Dict[str, SwitchOperation] = {}
-        self.completed_operations: List[SwitchOperation] = []
+        self.active_operations: dict[str, SwitchOperation] = {}
+        self.completed_operations: list[SwitchOperation] = []
         self.max_completed_history = 100
 
         # Concurrency control
@@ -81,17 +84,19 @@ class ModelSwitcher:
             "successful_switches": 0,
             "failed_switches": 0,
             "average_switch_duration": 0.0,
-            "switches_by_strategy": {}
+            "switches_by_strategy": {},
         }
 
         logger.info(f"Initialized ModelSwitcher with max_concurrent_switches={max_concurrent_switches}")
 
-    async def switch_model(self,
-                          model_id: str,
-                          target_version: str,
-                          strategy_type: SwitchingStrategyType = SwitchingStrategyType.IMMEDIATE,
-                          strategy_config: Optional[Dict[str, Any]] = None,
-                          metadata: Optional[Dict[str, Any]] = None) -> SwitchResult:
+    async def switch_model(
+        self,
+        model_id: str,
+        target_version: str,
+        strategy_type: SwitchingStrategyType = SwitchingStrategyType.IMMEDIATE,
+        strategy_config: dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> SwitchResult:
         """
         Initiate a model switch operation.
 
@@ -121,7 +126,7 @@ class ModelSwitcher:
                 from_version="unknown",
                 to_version=target_version,
                 strategy_type=strategy_type,
-                error_message=error_msg
+                error_message=error_msg,
             )
 
         from_version = current_instance.version
@@ -134,7 +139,7 @@ class ModelSwitcher:
             to_version=target_version,
             strategy_type=strategy_type,
             strategy_config=strategy_config,
-            metadata=metadata
+            metadata=metadata,
         )
 
         # Check if target version exists
@@ -208,8 +213,10 @@ class ModelSwitcher:
                 await asyncio.sleep(0.1)
 
             # Execute the switching strategy
-            logger.info(f"Executing {operation.strategy_type.value} switch for {operation.model_id}: "
-                       f"{operation.from_version} -> {operation.to_version}")
+            logger.info(
+                f"Executing {operation.strategy_type.value} switch for {operation.model_id}: "
+                f"{operation.from_version} -> {operation.to_version}"
+            )
 
             success = await strategy.execute_switch(self, operation)
 
@@ -256,9 +263,7 @@ class ModelSwitcher:
 
             # Begin transition for seamless handover
             if target_instance:
-                transition_id = self.transition_manager.begin_transition(
-                    model_id, current_instance, target_instance
-                )
+                transition_id = self.transition_manager.begin_transition(model_id, current_instance, target_instance)
 
                 # For immediate switch, complete transition immediately
                 # In practice, you'd wait for in-flight requests to complete
@@ -274,7 +279,7 @@ class ModelSwitcher:
             logger.error(f"Exception during immediate switch: {e}")
             return False
 
-    def _create_result(self, operation: SwitchOperation, error_message: Optional[str] = None) -> SwitchResult:
+    def _create_result(self, operation: SwitchOperation, error_message: str | None = None) -> SwitchResult:
         """
         Create a SwitchResult from an operation.
 
@@ -294,7 +299,7 @@ class ModelSwitcher:
             strategy_type=operation.strategy_type,
             duration_seconds=operation.duration,
             error_message=error_message,
-            metadata=operation.metadata
+            metadata=operation.metadata,
         )
 
     def _update_stats(self, operation: SwitchOperation):
@@ -318,7 +323,7 @@ class ModelSwitcher:
             self.stats["switches_by_strategy"][strategy_key] = 0
         self.stats["switches_by_strategy"][strategy_key] += 1
 
-    def get_switch_status(self, operation_id: str) -> Optional[Dict[str, Any]]:
+    def get_switch_status(self, operation_id: str) -> dict[str, Any] | None:
         """
         Get status of a switch operation.
 
@@ -341,7 +346,7 @@ class ModelSwitcher:
                 "progress": operation.progress,
                 "created_at": operation.created_at,
                 "started_at": operation.started_at,
-                "metadata": operation.metadata
+                "metadata": operation.metadata,
             }
 
         # Check completed operations
@@ -359,12 +364,12 @@ class ModelSwitcher:
                     "started_at": op.started_at,
                     "completed_at": op.completed_at,
                     "duration": op.duration,
-                    "metadata": op.metadata
+                    "metadata": op.metadata,
                 }
 
         return None
 
-    def list_active_switches(self) -> List[Dict[str, Any]]:
+    def list_active_switches(self) -> list[dict[str, Any]]:
         """
         List all active switch operations.
 
@@ -395,7 +400,7 @@ class ModelSwitcher:
         logger.info(f"Aborted switch operation {operation_id}")
         return True
 
-    def get_switcher_stats(self) -> Dict[str, Any]:
+    def get_switcher_stats(self) -> dict[str, Any]:
         """
         Get switcher statistics.
 
@@ -410,10 +415,10 @@ class ModelSwitcher:
             **self.stats,
             "active_operations": len(self.active_operations),
             "success_rate": success_rate,
-            "completed_operations_history": len(self.completed_operations)
+            "completed_operations_history": len(self.completed_operations),
         }
 
-    def get_available_strategies(self) -> List[Dict[str, Any]]:
+    def get_available_strategies(self) -> list[dict[str, Any]]:
         """
         Get information about available switching strategies.
 
@@ -424,12 +429,14 @@ class ModelSwitcher:
         for strategy_type in SwitchingStrategyType:
             try:
                 strategy = create_strategy(strategy_type, {})
-                strategies.append({
-                    "type": strategy_type.value,
-                    "name": strategy_type.value.replace("_", " ").title(),
-                    "description": self._get_strategy_description(strategy_type),
-                    "config_schema": strategy.get_strategy_config_schema()
-                })
+                strategies.append(
+                    {
+                        "type": strategy_type.value,
+                        "name": strategy_type.value.replace("_", " ").title(),
+                        "description": self._get_strategy_description(strategy_type),
+                        "config_schema": strategy.get_strategy_config_schema(),
+                    }
+                )
             except Exception as e:
                 logger.warning(f"Failed to create strategy {strategy_type}: {e}")
 
@@ -441,11 +448,13 @@ class ModelSwitcher:
             SwitchingStrategyType.IMMEDIATE: "Instantly switch all traffic to the new model version",
             SwitchingStrategyType.GRADUAL: "Gradually increase traffic to the new version over time",
             SwitchingStrategyType.AB_TEST: "Route traffic between versions for A/B testing",
-            SwitchingStrategyType.CANARY: "Start with small traffic percentage, gradually increase based on success metrics"
+            SwitchingStrategyType.CANARY: (
+                "Start with small traffic percentage, gradually increase based on success metrics"
+            ),
         }
         return descriptions.get(strategy_type, "Unknown strategy")
 
-    def validate_switch_request(self, model_id: str, target_version: str) -> Dict[str, Any]:
+    def validate_switch_request(self, model_id: str, target_version: str) -> dict[str, Any]:
         """
         Validate a switch request before execution.
 
@@ -456,11 +465,7 @@ class ModelSwitcher:
         Returns:
             Validation result dictionary
         """
-        result = {
-            "valid": True,
-            "warnings": [],
-            "errors": []
-        }
+        result = {"valid": True, "warnings": [], "errors": []}
 
         # Check if model exists
         versions = self.registry.get_model_versions(model_id)

@@ -6,16 +6,16 @@ memory-aware management, and pre-loading capabilities.
 """
 
 import asyncio
+import logging
 import threading
 import time
 from collections import OrderedDict
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from typing import Any
-
-from vllm.logger import init_logger
+from typing import Any, Dict, List, Optional, Set, Tuple
+from concurrent.futures import ThreadPoolExecutor
 
 from vllm_omni.model_executor.models.dynamic_registry import ModelInstance
+from vllm.logger import init_logger
 
 logger = init_logger(__name__)
 
@@ -23,7 +23,6 @@ logger = init_logger(__name__)
 @dataclass
 class CacheEntry:
     """Represents a cached model entry with metadata."""
-
     model_instance: ModelInstance
     cache_key: str
     access_count: int = 0
@@ -45,7 +44,6 @@ class CacheEntry:
 @dataclass
 class CacheStats:
     """Statistics for the model cache."""
-
     total_entries: int = 0
     total_size_bytes: int = 0
     hits: int = 0
@@ -148,14 +146,14 @@ class MemoryManager:
         with self._lock:
             return max(0, self.max_memory_bytes - self.current_memory_bytes)
 
-    def get_memory_stats(self) -> dict[str, Any]:
+    def get_memory_stats(self) -> Dict[str, Any]:
         """Get memory statistics."""
         with self._lock:
             return {
                 "max_memory_bytes": self.max_memory_bytes,
                 "current_memory_bytes": self.current_memory_bytes,
                 "available_memory_bytes": self.get_available_memory(),
-                "utilization_rate": self.current_memory_bytes / self.max_memory_bytes,
+                "utilization_rate": self.current_memory_bytes / self.max_memory_bytes
             }
 
 
@@ -171,9 +169,8 @@ class ModelCache:
     - Priority-based eviction
     """
 
-    def __init__(
-        self, max_cache_size: int = 5, memory_manager: MemoryManager | None = None, eviction_interval: float = 60.0
-    ):
+    def __init__(self, max_cache_size: int = 5, memory_manager: Optional[MemoryManager] = None,
+                 eviction_interval: float = 60.0):
         """
         Initialize the model cache.
 
@@ -191,20 +188,18 @@ class ModelCache:
         self._lock = threading.RLock()
 
         # Background tasks
-        self._eviction_task: asyncio.Task | None = None
+        self._eviction_task: Optional[asyncio.Task] = None
         self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="model-cache")
 
         # Statistics
         self.stats = CacheStats(max_size_bytes=self.memory_manager.max_memory_bytes)
 
         # Pre-loading queue
-        self.preload_queue: list[tuple[str, int]] = []
+        self.preload_queue: List[Tuple[str, int]] = []
         self.preload_lock = threading.Lock()
 
-        logger.info(
-            f"Initialized ModelCache with max_size={max_cache_size}, "
-            f"max_memory={self.memory_manager.max_memory_bytes / 1024**3:.1f}GB"
-        )
+        logger.info(f"Initialized ModelCache with max_size={max_cache_size}, "
+                   f"max_memory={self.memory_manager.max_memory_bytes / 1024**3:.1f}GB")
 
     def start_background_tasks(self):
         """Start background eviction and pre-loading tasks."""
@@ -282,7 +277,7 @@ class ModelCache:
             # This would involve loading the model in the background
             logger.debug(f"Pre-loading model {cache_key} with priority {priority}")
 
-    def get_model(self, cache_key: str) -> ModelInstance | None:
+    def get_model(self, cache_key: str) -> Optional[ModelInstance]:
         """
         Retrieve a model from cache.
 
@@ -306,7 +301,8 @@ class ModelCache:
                 self.stats.misses += 1
                 return None
 
-    def put_model(self, cache_key: str, model_instance: ModelInstance, priority: int = 0) -> bool:
+    def put_model(self, cache_key: str, model_instance: ModelInstance,
+                  priority: int = 0) -> bool:
         """
         Store a model in cache.
 
@@ -337,7 +333,10 @@ class ModelCache:
 
             # Create new entry
             entry = CacheEntry(
-                model_instance=model_instance, cache_key=cache_key, size_bytes=size_bytes, priority=priority
+                model_instance=model_instance,
+                cache_key=cache_key,
+                size_bytes=size_bytes,
+                priority=priority
             )
 
             # Add to cache
@@ -420,9 +419,10 @@ class ModelCache:
             self.stats.total_size_bytes = 0
             self.stats.evictions += evicted_count
 
-            logger.info(f"Cleared cache: evicted {evicted_count} models (freed {total_size / 1024**3:.2f}GB)")
+            logger.info(f"Cleared cache: evicted {evicted_count} models "
+                       f"(freed {total_size / 1024**3:.2f}GB)")
 
-    def get_cache_stats(self) -> dict[str, Any]:
+    def get_cache_stats(self) -> Dict[str, Any]:
         """
         Get cache statistics.
 
@@ -444,10 +444,10 @@ class ModelCache:
                 "evictions": self.stats.evictions,
                 "loads": self.stats.loads,
                 "memory_stats": memory_stats,
-                "preload_queue_size": len(self.preload_queue),
+                "preload_queue_size": len(self.preload_queue)
             }
 
-    def list_cached_models(self) -> list[dict[str, Any]]:
+    def list_cached_models(self) -> List[Dict[str, Any]]:
         """
         List all cached models with metadata.
 
@@ -465,7 +465,7 @@ class ModelCache:
                     "idle_time_seconds": entry.idle_time,
                     "size_bytes": entry.size_bytes,
                     "size_gb": entry.size_bytes / 1024**3,
-                    "priority": entry.priority,
+                    "priority": entry.priority
                 }
                 for entry in self.cache.values()
             ]
@@ -483,5 +483,5 @@ class ModelCache:
     def __del__(self):
         """Cleanup on destruction."""
         self.stop_background_tasks()
-        if hasattr(self, "_executor"):
+        if hasattr(self, '_executor'):
             self._executor.shutdown(wait=False)

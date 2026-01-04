@@ -6,23 +6,24 @@ ensuring in-flight requests complete with old models while new requests use swit
 """
 
 import asyncio
-import logging
 import threading
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Set, Tuple
-from concurrent.futures import ThreadPoolExecutor
+from typing import Any
+
+from vllm.logger import init_logger
 
 from vllm_omni.model_executor.models.dynamic_registry import ModelInstance
-from vllm.logger import init_logger
 
 logger = init_logger(__name__)
 
 
 class TransitionState(Enum):
     """States for a model transition."""
+
     PENDING = "pending"
     ACTIVE = "active"
     COMPLETING = "completing"
@@ -34,16 +35,17 @@ class TransitionState(Enum):
 @dataclass
 class TransitionRequest:
     """Represents a request during transition."""
+
     request_id: str
     model_id: str
     from_version: str
     to_version: str
     created_at: float = field(default_factory=time.time)
-    completed_at: Optional[float] = None
-    assigned_model: Optional[ModelInstance] = None
+    completed_at: float | None = None
+    assigned_model: ModelInstance | None = None
 
     @property
-    def duration(self) -> Optional[float]:
+    def duration(self) -> float | None:
         """Get request duration if completed."""
         if self.completed_at:
             return self.completed_at - self.created_at
@@ -58,20 +60,21 @@ class TransitionRequest:
 @dataclass
 class TransitionOperation:
     """Represents a model transition operation."""
+
     transition_id: str
     model_id: str
     from_version: str
     to_version: str
     state: TransitionState = TransitionState.PENDING
     created_at: float = field(default_factory=time.time)
-    started_at: Optional[float] = None
-    completed_at: Optional[float] = None
-    active_requests: Set[str] = field(default_factory=set)
-    completed_requests: List[TransitionRequest] = field(default_factory=list)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    started_at: float | None = None
+    completed_at: float | None = None
+    active_requests: set[str] = field(default_factory=set)
+    completed_requests: list[TransitionRequest] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     @property
-    def duration(self) -> Optional[float]:
+    def duration(self) -> float | None:
         """Get transition duration if completed."""
         if self.completed_at and self.started_at:
             return self.completed_at - self.started_at
@@ -114,8 +117,8 @@ class RequestTracker:
         Args:
             max_history_size: Maximum number of completed requests to keep in history
         """
-        self.active_requests: Dict[str, TransitionRequest] = {}
-        self.completed_requests: List[TransitionRequest] = []
+        self.active_requests: dict[str, TransitionRequest] = {}
+        self.completed_requests: list[TransitionRequest] = []
         self.max_history_size = max_history_size
         self._lock = threading.RLock()
 
@@ -149,7 +152,7 @@ class RequestTracker:
                 if len(self.completed_requests) > self.max_history_size:
                     self.completed_requests.pop(0)
 
-    def get_active_requests(self, model_id: Optional[str] = None) -> List[TransitionRequest]:
+    def get_active_requests(self, model_id: str | None = None) -> list[TransitionRequest]:
         """
         Get active requests, optionally filtered by model.
 
@@ -165,13 +168,13 @@ class RequestTracker:
                 requests = [r for r in requests if r.model_id == model_id]
             return requests
 
-    def get_request_stats(self) -> Dict[str, Any]:
+    def get_request_stats(self) -> dict[str, Any]:
         """Get request tracking statistics."""
         with self._lock:
             return {
                 "active_requests": len(self.active_requests),
                 "completed_requests": len(self.completed_requests),
-                "max_history_size": self.max_history_size
+                "max_history_size": self.max_history_size,
             }
 
 
@@ -186,9 +189,12 @@ class TransitionManager:
     - Failure recovery and rollback
     """
 
-    def __init__(self, request_tracker: Optional[RequestTracker] = None,
-                 max_transition_time: float = 300.0,  # 5 minutes
-                 request_timeout: float = 60.0):  # 1 minute
+    def __init__(
+        self,
+        request_tracker: RequestTracker | None = None,
+        max_transition_time: float = 300.0,  # 5 minutes
+        request_timeout: float = 60.0,
+    ):  # 1 minute
         """
         Initialize transition manager.
 
@@ -202,19 +208,21 @@ class TransitionManager:
         self.request_timeout = request_timeout
 
         # Transition storage
-        self.active_transitions: Dict[str, TransitionOperation] = {}
-        self.completed_transitions: List[TransitionOperation] = []
+        self.active_transitions: dict[str, TransitionOperation] = {}
+        self.completed_transitions: list[TransitionOperation] = []
         self.max_completed_history = 100
 
         # Model routing during transitions
-        self.transition_routing: Dict[str, Tuple[ModelInstance, ModelInstance]] = {}  # model_id -> (old_model, new_model)
+        self.transition_routing: dict[
+            str, tuple[ModelInstance, ModelInstance]
+        ] = {}  # model_id -> (old_model, new_model)
 
         # Threading
         self._lock = threading.RLock()
         self._executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="transition-mgr")
 
         # Background cleanup
-        self._cleanup_task: Optional[asyncio.Task] = None
+        self._cleanup_task: asyncio.Task | None = None
 
         logger.info(f"Initialized TransitionManager with max_transition_time={max_transition_time}s")
 
@@ -246,8 +254,10 @@ class TransitionManager:
 
         with self._lock:
             for transition_id, transition in self.active_transitions.items():
-                if (transition.state == TransitionState.ACTIVE and
-                    current_time - transition.created_at > self.max_transition_time):
+                if (
+                    transition.state == TransitionState.ACTIVE
+                    and current_time - transition.created_at > self.max_transition_time
+                ):
                     expired_transitions.append(transition_id)
 
             for transition_id in expired_transitions:
@@ -264,8 +274,7 @@ class TransitionManager:
         if expired_transitions:
             logger.info(f"Cleaned up {len(expired_transitions)} expired transitions")
 
-    def begin_transition(self, model_id: str, from_model: ModelInstance,
-                        to_model: ModelInstance) -> str:
+    def begin_transition(self, model_id: str, from_model: ModelInstance, to_model: ModelInstance) -> str:
         """
         Begin a model transition.
 
@@ -280,10 +289,7 @@ class TransitionManager:
         transition_id = str(uuid.uuid4())
 
         transition = TransitionOperation(
-            transition_id=transition_id,
-            model_id=model_id,
-            from_version=from_model.version,
-            to_version=to_model.version
+            transition_id=transition_id, model_id=model_id, from_version=from_model.version, to_version=to_model.version
         )
 
         with self._lock:
@@ -291,8 +297,9 @@ class TransitionManager:
             self.transition_routing[model_id] = (from_model, to_model)
 
         transition.start()
-        logger.info(f"Began transition {transition_id} for model {model_id}: "
-                   f"{from_model.version} -> {to_model.version}")
+        logger.info(
+            f"Began transition {transition_id} for model {model_id}: {from_model.version} -> {to_model.version}"
+        )
 
         return transition_id
 
@@ -317,7 +324,7 @@ class TransitionManager:
                     request_id=request_id,
                     model_id=model_id,
                     from_version=old_model.version,
-                    to_version=new_model.version
+                    to_version=new_model.version,
                 )
 
                 # Track the request
@@ -325,8 +332,7 @@ class TransitionManager:
 
                 # Find the active transition and add this request
                 for transition in self.active_transitions.values():
-                    if (transition.model_id == model_id and
-                        transition.state == TransitionState.ACTIVE):
+                    if transition.model_id == model_id and transition.state == TransitionState.ACTIVE:
                         transition.active_requests.add(request_id)
                         break
 
@@ -353,9 +359,7 @@ class TransitionManager:
             for transition in self.active_transitions.values():
                 if request_id in transition.active_requests:
                     transition.active_requests.remove(request_id)
-                    transition.completed_requests.append(
-                        self.request_tracker.completed_requests[-1]
-                    )
+                    transition.completed_requests.append(self.request_tracker.completed_requests[-1])
                     break
 
     def complete_transition(self, transition_id: str) -> bool:
@@ -377,8 +381,9 @@ class TransitionManager:
 
             # Check if all requests are completed
             if transition.active_requests:
-                logger.warning(f"Completing transition {transition_id} with "
-                             f"{len(transition.active_requests)} active requests")
+                logger.warning(
+                    f"Completing transition {transition_id} with {len(transition.active_requests)} active requests"
+                )
 
             # Remove routing rule
             if transition.model_id in self.transition_routing:
@@ -425,7 +430,7 @@ class TransitionManager:
             logger.info(f"Rolled back transition {transition_id} for model {transition.model_id}")
             return True
 
-    def get_transition_status(self, transition_id: str) -> Optional[Dict[str, Any]]:
+    def get_transition_status(self, transition_id: str) -> dict[str, Any] | None:
         """
         Get status of a transition.
 
@@ -436,8 +441,9 @@ class TransitionManager:
             Transition status dictionary or None if not found
         """
         with self._lock:
-            transition = (self.active_transitions.get(transition_id) or
-                         next((t for t in self.completed_transitions if t.transition_id == transition_id), None))
+            transition = self.active_transitions.get(transition_id) or next(
+                (t for t in self.completed_transitions if t.transition_id == transition_id), None
+            )
 
             if not transition:
                 return None
@@ -455,10 +461,10 @@ class TransitionManager:
                 "active_requests": len(transition.active_requests),
                 "completed_requests": len(transition.completed_requests),
                 "total_requests": transition.total_requests,
-                "metadata": transition.metadata
+                "metadata": transition.metadata,
             }
 
-    def list_active_transitions(self) -> List[Dict[str, Any]]:
+    def list_active_transitions(self) -> list[dict[str, Any]]:
         """
         List all active transitions.
 
@@ -468,7 +474,7 @@ class TransitionManager:
         with self._lock:
             return [self.get_transition_status(tid) for tid in self.active_transitions.keys()]
 
-    def get_transition_stats(self) -> Dict[str, Any]:
+    def get_transition_stats(self) -> dict[str, Any]:
         """
         Get transition statistics.
 
@@ -492,7 +498,7 @@ class TransitionManager:
                 "total_requests_handled": total_requests,
                 "average_transition_duration": avg_duration,
                 "max_completed_history": self.max_completed_history,
-                "active_routing_rules": len(self.transition_routing)
+                "active_routing_rules": len(self.transition_routing),
             }
 
     def is_transition_active(self, model_id: str) -> bool:
@@ -511,5 +517,5 @@ class TransitionManager:
     def __del__(self):
         """Cleanup on destruction."""
         self.stop_cleanup_task()
-        if hasattr(self, '_executor'):
+        if hasattr(self, "_executor"):
             self._executor.shutdown(wait=False)

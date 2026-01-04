@@ -5,22 +5,26 @@ This module provides different strategies for model switching including immediat
 gradual rollout, A/B testing, and canary deployments.
 """
 
+from __future__ import annotations
+
 import asyncio
-import logging
 import random
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
 from enum import Enum
+from typing import Any
 
 from vllm.logger import init_logger
+
+from vllm_omni.model_executor.models.model_switcher import ModelSwitcher
 
 logger = init_logger(__name__)
 
 
 class SwitchingStrategyType(Enum):
     """Types of switching strategies."""
+
     IMMEDIATE = "immediate"
     GRADUAL = "gradual"
     AB_TEST = "ab_test"
@@ -30,21 +34,22 @@ class SwitchingStrategyType(Enum):
 @dataclass
 class SwitchOperation:
     """Represents a model switch operation."""
+
     operation_id: str
     model_id: str
     from_version: str
     to_version: str
     strategy_type: SwitchingStrategyType
-    strategy_config: Dict[str, Any] = field(default_factory=dict)
+    strategy_config: dict[str, Any] = field(default_factory=dict)
     created_at: float = field(default_factory=time.time)
-    started_at: Optional[float] = None
-    completed_at: Optional[float] = None
+    started_at: float | None = None
+    completed_at: float | None = None
     status: str = "pending"  # pending, active, completed, failed
     progress: float = 0.0  # 0.0 to 1.0
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     @property
-    def duration(self) -> Optional[float]:
+    def duration(self) -> float | None:
         """Get operation duration if completed."""
         if self.completed_at and self.started_at:
             return self.completed_at - self.started_at
@@ -81,7 +86,7 @@ class SwitchingStrategy(ABC):
     """
 
     @abstractmethod
-    async def execute_switch(self, switcher: 'ModelSwitcher', operation: SwitchOperation) -> bool:
+    async def execute_switch(self, switcher: ModelSwitcher, operation: SwitchOperation) -> bool:
         """
         Execute the switching strategy.
 
@@ -109,7 +114,7 @@ class SwitchingStrategy(ABC):
         pass
 
     @abstractmethod
-    def get_strategy_config_schema(self) -> Dict[str, Any]:
+    def get_strategy_config_schema(self) -> dict[str, Any]:
         """
         Get configuration schema for this strategy.
 
@@ -127,7 +132,7 @@ class ImmediateSwitch(SwitchingStrategy):
     This is the simplest and fastest strategy but provides no gradual rollout.
     """
 
-    async def execute_switch(self, switcher: 'ModelSwitcher', operation: SwitchOperation) -> bool:
+    async def execute_switch(self, switcher: ModelSwitcher, operation: SwitchOperation) -> bool:
         """
         Execute immediate switch.
 
@@ -142,15 +147,14 @@ class ImmediateSwitch(SwitchingStrategy):
             operation.start()
 
             # Immediately switch to new version
-            success = switcher._perform_immediate_switch(
-                operation.model_id,
-                operation.to_version
-            )
+            success = switcher._perform_immediate_switch(operation.model_id, operation.to_version)
 
             if success:
                 operation.complete()
-                logger.info(f"Immediate switch completed for {operation.model_id}: "
-                           f"{operation.from_version} -> {operation.to_version}")
+                logger.info(
+                    f"Immediate switch completed for {operation.model_id}: "
+                    f"{operation.from_version} -> {operation.to_version}"
+                )
             else:
                 operation.fail("Immediate switch failed")
                 logger.error(f"Immediate switch failed for {operation.model_id}")
@@ -178,13 +182,9 @@ class ImmediateSwitch(SwitchingStrategy):
         else:
             return operation.from_version
 
-    def get_strategy_config_schema(self) -> Dict[str, Any]:
+    def get_strategy_config_schema(self) -> dict[str, Any]:
         """Get configuration schema."""
-        return {
-            "type": "object",
-            "properties": {},
-            "description": "Immediate switching - no configuration needed"
-        }
+        return {"type": "object", "properties": {}, "description": "Immediate switching - no configuration needed"}
 
 
 class GradualRollout(SwitchingStrategy):
@@ -195,7 +195,7 @@ class GradualRollout(SwitchingStrategy):
     according to a specified schedule.
     """
 
-    async def execute_switch(self, switcher: 'ModelSwitcher', operation: SwitchOperation) -> bool:
+    async def execute_switch(self, switcher: ModelSwitcher, operation: SwitchOperation) -> bool:
         """
         Execute gradual rollout.
 
@@ -227,10 +227,7 @@ class GradualRollout(SwitchingStrategy):
                     await asyncio.sleep(step_duration)
 
             # Complete the switch
-            success = switcher._perform_immediate_switch(
-                operation.model_id,
-                operation.to_version
-            )
+            success = switcher._perform_immediate_switch(operation.model_id, operation.to_version)
 
             if success:
                 operation.complete()
@@ -271,7 +268,7 @@ class GradualRollout(SwitchingStrategy):
         else:
             return operation.from_version
 
-    def get_strategy_config_schema(self) -> Dict[str, Any]:
+    def get_strategy_config_schema(self) -> dict[str, Any]:
         """Get configuration schema."""
         return {
             "type": "object",
@@ -281,17 +278,17 @@ class GradualRollout(SwitchingStrategy):
                     "minimum": 1,
                     "maximum": 1440,  # 24 hours
                     "default": 10,
-                    "description": "Total duration of rollout in minutes"
+                    "description": "Total duration of rollout in minutes",
                 },
                 "steps": {
                     "type": "integer",
                     "minimum": 2,
                     "maximum": 100,
                     "default": 10,
-                    "description": "Number of rollout steps"
-                }
+                    "description": "Number of rollout steps",
+                },
             },
-            "required": []
+            "required": [],
         }
 
 
@@ -303,7 +300,7 @@ class ABTestSwitch(SwitchingStrategy):
     allowing comparison of model performance.
     """
 
-    async def execute_switch(self, switcher: 'ModelSwitcher', operation: SwitchOperation) -> bool:
+    async def execute_switch(self, switcher: ModelSwitcher, operation: SwitchOperation) -> bool:
         """
         Execute A/B test setup.
 
@@ -321,14 +318,17 @@ class ABTestSwitch(SwitchingStrategy):
             test_duration_hours = config.get("test_duration_hours", 24)
             traffic_percentage = config.get("traffic_percentage", 50)
 
-            operation.metadata.update({
-                "test_duration_hours": test_duration_hours,
-                "traffic_percentage": traffic_percentage,
-                "start_time": time.time()
-            })
+            operation.metadata.update(
+                {
+                    "test_duration_hours": test_duration_hours,
+                    "traffic_percentage": traffic_percentage,
+                    "start_time": time.time(),
+                }
+            )
 
-            logger.info(f"Starting A/B test for {operation.model_id}: "
-                       f"{traffic_percentage}% traffic to {operation.to_version}")
+            logger.info(
+                f"Starting A/B test for {operation.model_id}: {traffic_percentage}% traffic to {operation.to_version}"
+            )
 
             # Wait for test duration
             await asyncio.sleep(test_duration_hours * 3600)
@@ -369,7 +369,7 @@ class ABTestSwitch(SwitchingStrategy):
         else:
             return operation.from_version
 
-    def get_strategy_config_schema(self) -> Dict[str, Any]:
+    def get_strategy_config_schema(self) -> dict[str, Any]:
         """Get configuration schema."""
         return {
             "type": "object",
@@ -379,23 +379,23 @@ class ABTestSwitch(SwitchingStrategy):
                     "minimum": 0,
                     "maximum": 100,
                     "default": 50,
-                    "description": "Percentage of traffic to route to new version"
+                    "description": "Percentage of traffic to route to new version",
                 },
                 "test_duration_hours": {
                     "type": "number",
                     "minimum": 1,
                     "maximum": 168,  # 1 week
                     "default": 24,
-                    "description": "Duration of A/B test in hours"
+                    "description": "Duration of A/B test in hours",
                 },
                 "target_metric": {
                     "type": "string",
                     "enum": ["latency", "throughput", "accuracy", "error_rate"],
                     "default": "latency",
-                    "description": "Metric to optimize for"
-                }
+                    "description": "Metric to optimize for",
+                },
             },
-            "required": []
+            "required": [],
         }
 
 
@@ -407,7 +407,7 @@ class CanarySwitch(SwitchingStrategy):
     then gradually increases based on success metrics.
     """
 
-    async def execute_switch(self, switcher: 'ModelSwitcher', operation: SwitchOperation) -> bool:
+    async def execute_switch(self, switcher: ModelSwitcher, operation: SwitchOperation) -> bool:
         """
         Execute canary deployment.
 
@@ -430,8 +430,9 @@ class CanarySwitch(SwitchingStrategy):
             current_percentage = initial_percentage
             operation.metadata["current_traffic_percentage"] = current_percentage
 
-            logger.info(f"Starting canary deployment for {operation.model_id} "
-                       f"with initial {initial_percentage}% traffic")
+            logger.info(
+                f"Starting canary deployment for {operation.model_id} with initial {initial_percentage}% traffic"
+            )
 
             while current_percentage < max_percentage:
                 operation.update_progress(current_percentage / max_percentage)
@@ -452,10 +453,7 @@ class CanarySwitch(SwitchingStrategy):
                 current_percentage = min(current_percentage + step_percentage, max_percentage)
 
             # Complete the rollout
-            success = switcher._perform_immediate_switch(
-                operation.model_id,
-                operation.to_version
-            )
+            success = switcher._perform_immediate_switch(operation.model_id, operation.to_version)
 
             if success:
                 operation.complete()
@@ -483,7 +481,7 @@ class CanarySwitch(SwitchingStrategy):
         # Simplified evaluation - in practice, you'd check actual metrics
         # like error rates, latency, etc.
         config = operation.strategy_config
-        max_error_rate = config.get("max_error_rate_threshold", 0.05)
+        _max_error_rate = config.get("max_error_rate_threshold", 0.05)
 
         # Mock evaluation - assume success for demo
         return random.random() > 0.1  # 90% success rate
@@ -513,7 +511,7 @@ class CanarySwitch(SwitchingStrategy):
         else:
             return operation.from_version
 
-    def get_strategy_config_schema(self) -> Dict[str, Any]:
+    def get_strategy_config_schema(self) -> dict[str, Any]:
         """Get configuration schema."""
         return {
             "type": "object",
@@ -523,38 +521,38 @@ class CanarySwitch(SwitchingStrategy):
                     "minimum": 1,
                     "maximum": 50,
                     "default": 5,
-                    "description": "Initial percentage of traffic for canary"
+                    "description": "Initial percentage of traffic for canary",
                 },
                 "max_percentage": {
                     "type": "number",
                     "minimum": 10,
                     "maximum": 100,
                     "default": 100,
-                    "description": "Maximum percentage to rollout"
+                    "description": "Maximum percentage to rollout",
                 },
                 "step_percentage": {
                     "type": "number",
                     "minimum": 5,
                     "maximum": 50,
                     "default": 10,
-                    "description": "Percentage increase per step"
+                    "description": "Percentage increase per step",
                 },
                 "evaluation_period_minutes": {
                     "type": "number",
                     "minimum": 5,
                     "maximum": 1440,  # 24 hours
                     "default": 15,
-                    "description": "Minutes to evaluate each canary step"
+                    "description": "Minutes to evaluate each canary step",
                 },
                 "max_error_rate_threshold": {
                     "type": "number",
                     "minimum": 0.0,
                     "maximum": 1.0,
                     "default": 0.05,
-                    "description": "Maximum error rate threshold for success"
-                }
+                    "description": "Maximum error rate threshold for success",
+                },
             },
-            "required": []
+            "required": [],
         }
 
 
@@ -567,7 +565,7 @@ STRATEGY_CLASSES = {
 }
 
 
-def create_strategy(strategy_type: SwitchingStrategyType, config: Dict[str, Any]) -> SwitchingStrategy:
+def create_strategy(strategy_type: SwitchingStrategyType, config: dict[str, Any]) -> SwitchingStrategy:
     """
     Create a switching strategy instance.
 
@@ -595,4 +593,4 @@ def create_strategy(strategy_type: SwitchingStrategyType, config: Dict[str, Any]
             if "maximum" in prop_schema and value > prop_schema["maximum"]:
                 raise ValueError(f"{key} must be <= {prop_schema['maximum']}")
 
-    return strategy</content>
+    return strategy

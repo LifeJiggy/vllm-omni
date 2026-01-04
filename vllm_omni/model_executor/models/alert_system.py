@@ -8,22 +8,24 @@ health monitoring, and system issues.
 import asyncio
 import json
 import logging
+import os
+import smtplib
+from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from enum import Enum
-from typing import Any, Dict, List, Optional, Callable, Awaitable
-from collections import defaultdict
-import smtplib
-from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from enum import Enum
+from typing import Any
+
 import aiohttp
-import os
 
 logger = logging.getLogger(__name__)
 
 
 class AlertSeverity(Enum):
     """Alert severity levels"""
+
     INFO = "info"
     WARNING = "warning"
     ERROR = "error"
@@ -32,6 +34,7 @@ class AlertSeverity(Enum):
 
 class AlertType(Enum):
     """Types of alerts that can be triggered"""
+
     MODEL_SWITCH_FAILED = "model_switch_failed"
     MODEL_HEALTH_DEGRADED = "model_health_degraded"
     MODEL_LOAD_FAILED = "model_load_failed"
@@ -47,19 +50,20 @@ class AlertType(Enum):
 @dataclass
 class Alert:
     """Represents an alert instance"""
+
     id: str
     type: AlertType
     severity: AlertSeverity
     title: str
     message: str
-    model_name: Optional[str] = None
-    version: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    model_name: str | None = None
+    version: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
     timestamp: datetime = field(default_factory=datetime.now)
     resolved: bool = False
-    resolved_at: Optional[datetime] = None
+    resolved_at: datetime | None = None
     auto_resolve: bool = False
-    resolve_after_minutes: Optional[int] = None
+    resolve_after_minutes: int | None = None
 
 
 class AlertHandler:
@@ -94,12 +98,9 @@ class ConsoleAlertHandler(AlertHandler):
 class EmailAlertHandler(AlertHandler):
     """Sends alerts via email"""
 
-    def __init__(self,
-                 smtp_server: str,
-                 smtp_port: int,
-                 sender_email: str,
-                 sender_password: str,
-                 recipient_emails: List[str]):
+    def __init__(
+        self, smtp_server: str, smtp_port: int, sender_email: str, sender_password: str, recipient_emails: list[str]
+    ):
         self.smtp_server = smtp_server
         self.smtp_port = smtp_port
         self.sender_email = sender_email
@@ -109,9 +110,9 @@ class EmailAlertHandler(AlertHandler):
     async def send_alert(self, alert: Alert) -> bool:
         try:
             msg = MIMEMultipart()
-            msg['From'] = self.sender_email
-            msg['To'] = ', '.join(self.recipient_emails)
-            msg['Subject'] = f"[{alert.severity.value.upper()}] {alert.title}"
+            msg["From"] = self.sender_email
+            msg["To"] = ", ".join(self.recipient_emails)
+            msg["Subject"] = f"[{alert.severity.value.upper()}] {alert.title}"
 
             body = f"""
 Model Switching Alert
@@ -129,7 +130,7 @@ Metadata:
 {json.dumps(alert.metadata, indent=2, default=str)}
             """
 
-            msg.attach(MIMEText(body, 'plain'))
+            msg.attach(MIMEText(body, "plain"))
 
             server = smtplib.SMTP(self.smtp_server, self.smtp_port)
             server.starttls()
@@ -147,7 +148,7 @@ Metadata:
 class WebhookAlertHandler(AlertHandler):
     """Sends alerts via HTTP webhook"""
 
-    def __init__(self, webhook_url: str, headers: Optional[Dict[str, str]] = None):
+    def __init__(self, webhook_url: str, headers: dict[str, str] | None = None):
         self.webhook_url = webhook_url
         self.headers = headers or {}
 
@@ -163,15 +164,11 @@ class WebhookAlertHandler(AlertHandler):
                 "version": alert.version,
                 "metadata": alert.metadata,
                 "timestamp": alert.timestamp.isoformat(),
-                "resolved": alert.resolved
+                "resolved": alert.resolved,
             }
 
             async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    self.webhook_url,
-                    json=payload,
-                    headers=self.headers
-                ) as response:
+                async with session.post(self.webhook_url, json=payload, headers=self.headers) as response:
                     return response.status == 200
         except Exception as e:
             logger.error(f"Failed to send webhook alert: {e}")
@@ -190,30 +187,28 @@ class SlackAlertHandler(AlertHandler):
                 AlertSeverity.INFO: "good",
                 AlertSeverity.WARNING: "warning",
                 AlertSeverity.ERROR: "danger",
-                AlertSeverity.CRITICAL: "danger"
+                AlertSeverity.CRITICAL: "danger",
             }
 
             payload = {
-                "attachments": [{
-                    "color": color_map.get(alert.severity, "danger"),
-                    "title": alert.title,
-                    "text": alert.message,
-                    "fields": [
-                        {"title": "Type", "value": alert.type.value, "short": True},
-                        {"title": "Severity", "value": alert.severity.value, "short": True},
-                        {"title": "Time", "value": alert.timestamp.isoformat(), "short": True}
-                    ]
-                }]
+                "attachments": [
+                    {
+                        "color": color_map.get(alert.severity, "danger"),
+                        "title": alert.title,
+                        "text": alert.message,
+                        "fields": [
+                            {"title": "Type", "value": alert.type.value, "short": True},
+                            {"title": "Severity", "value": alert.severity.value, "short": True},
+                            {"title": "Time", "value": alert.timestamp.isoformat(), "short": True},
+                        ],
+                    }
+                ]
             }
 
             if alert.model_name:
-                payload["attachments"][0]["fields"].append({
-                    "title": "Model", "value": alert.model_name, "short": True
-                })
+                payload["attachments"][0]["fields"].append({"title": "Model", "value": alert.model_name, "short": True})
             if alert.version:
-                payload["attachments"][0]["fields"].append({
-                    "title": "Version", "value": alert.version, "short": True
-                })
+                payload["attachments"][0]["fields"].append({"title": "Version", "value": alert.version, "short": True})
 
             async with aiohttp.ClientSession() as session:
                 async with session.post(self.webhook_url, json=payload) as response:
@@ -227,11 +222,11 @@ class AlertManager:
     """Manages alerts and alert handlers"""
 
     def __init__(self):
-        self.alerts: Dict[str, Alert] = {}
-        self.handlers: List[AlertHandler] = []
-        self.alert_counts: Dict[AlertType, int] = defaultdict(int)
-        self.cooldowns: Dict[str, datetime] = {}  # alert_key -> last_sent_time
-        self._cleanup_task: Optional[asyncio.Task] = None
+        self.alerts: dict[str, Alert] = {}
+        self.handlers: list[AlertHandler] = []
+        self.alert_counts: dict[AlertType, int] = defaultdict(int)
+        self.cooldowns: dict[str, datetime] = {}  # alert_key -> last_sent_time
+        self._cleanup_task: asyncio.Task | None = None
 
     def add_handler(self, handler: AlertHandler):
         """Add an alert handler"""
@@ -241,17 +236,19 @@ class AlertManager:
         """Remove an alert handler"""
         self.handlers.remove(handler)
 
-    async def raise_alert(self,
-                         alert_type: AlertType,
-                         severity: AlertSeverity,
-                         title: str,
-                         message: str,
-                         model_name: Optional[str] = None,
-                         version: Optional[str] = None,
-                         metadata: Optional[Dict[str, Any]] = None,
-                         auto_resolve: bool = False,
-                         resolve_after_minutes: Optional[int] = None,
-                         cooldown_minutes: int = 5) -> str:
+    async def raise_alert(
+        self,
+        alert_type: AlertType,
+        severity: AlertSeverity,
+        title: str,
+        message: str,
+        model_name: str | None = None,
+        version: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        auto_resolve: bool = False,
+        resolve_after_minutes: int | None = None,
+        cooldown_minutes: int = 5,
+    ) -> str:
         """
         Raise a new alert
 
@@ -293,7 +290,7 @@ class AlertManager:
             version=version,
             metadata=metadata or {},
             auto_resolve=auto_resolve,
-            resolve_after_minutes=resolve_after_minutes
+            resolve_after_minutes=resolve_after_minutes,
         )
 
         self.alerts[alert_id] = alert
@@ -319,7 +316,7 @@ class AlertManager:
         logger.info(f"Alert raised: {alert_type.value} ({severity.value}) - {title}")
         return alert_id
 
-    async def resolve_alert(self, alert_id: str, resolution_message: Optional[str] = None):
+    async def resolve_alert(self, alert_id: str, resolution_message: str | None = None):
         """Resolve an alert"""
         if alert_id not in self.alerts:
             logger.warning(f"Alert {alert_id} not found")
@@ -344,9 +341,7 @@ class AlertManager:
         if alert_id in self.alerts and not self.alerts[alert_id].resolved:
             await self.resolve_alert(alert_id, f"Auto-resolved after {delay_minutes} minutes")
 
-    def get_active_alerts(self,
-                         alert_type: Optional[AlertType] = None,
-                         model_name: Optional[str] = None) -> List[Alert]:
+    def get_active_alerts(self, alert_type: AlertType | None = None, model_name: str | None = None) -> list[Alert]:
         """Get active (unresolved) alerts"""
         alerts = [a for a in self.alerts.values() if not a.resolved]
 
@@ -357,9 +352,7 @@ class AlertManager:
 
         return alerts
 
-    def get_alert_history(self,
-                         hours: int = 24,
-                         alert_type: Optional[AlertType] = None) -> List[Alert]:
+    def get_alert_history(self, hours: int = 24, alert_type: AlertType | None = None) -> list[Alert]:
         """Get alert history for the specified time period"""
         cutoff = datetime.now() - timedelta(hours=hours)
         alerts = [a for a in self.alerts.values() if a.timestamp >= cutoff]
@@ -369,7 +362,7 @@ class AlertManager:
 
         return sorted(alerts, key=lambda x: x.timestamp, reverse=True)
 
-    def get_alert_stats(self) -> Dict[str, Any]:
+    def get_alert_stats(self) -> dict[str, Any]:
         """Get alert statistics"""
         total_alerts = len(self.alerts)
         active_alerts = len([a for a in self.alerts.values() if not a.resolved])
@@ -387,7 +380,7 @@ class AlertManager:
             "active_alerts": active_alerts,
             "resolved_alerts": resolved_alerts,
             "severity_breakdown": dict(severity_counts),
-            "type_breakdown": dict(type_counts)
+            "type_breakdown": dict(type_counts),
         }
 
     async def start_cleanup_task(self, interval_minutes: int = 60):
@@ -437,7 +430,7 @@ def setup_default_alert_handlers():
                 smtp_port=int(os.getenv("ALERT_SMTP_PORT", "587")),
                 sender_email=os.getenv("ALERT_SENDER_EMAIL", ""),
                 sender_password=os.getenv("ALERT_SENDER_PASSWORD", ""),
-                recipient_emails=os.getenv("ALERT_RECIPIENT_EMAILS", "").split(",")
+                recipient_emails=os.getenv("ALERT_RECIPIENT_EMAILS", "").split(","),
             )
             alert_manager.add_handler(email_handler)
             logger.info("Email alert handler configured")
@@ -469,10 +462,7 @@ def setup_default_alert_handlers():
 setup_default_alert_handlers()
 
 
-async def alert_model_switch_failed(model_name: str,
-                                   version: str,
-                                   error: str,
-                                   metadata: Optional[Dict[str, Any]] = None):
+async def alert_model_switch_failed(model_name: str, version: str, error: str, metadata: dict[str, Any] | None = None):
     """Alert for model switch failure"""
     return await alert_manager.raise_alert(
         AlertType.MODEL_SWITCH_FAILED,
@@ -481,16 +471,18 @@ async def alert_model_switch_failed(model_name: str,
         f"Failed to switch {model_name} to version {version}: {error}",
         model_name=model_name,
         version=version,
-        metadata=metadata
+        metadata=metadata,
     )
 
 
-async def alert_model_health_degraded(model_name: str,
-                                     version: str,
-                                     metric: str,
-                                     current_value: float,
-                                     threshold: float,
-                                     metadata: Optional[Dict[str, Any]] = None):
+async def alert_model_health_degraded(
+    model_name: str,
+    version: str,
+    metric: str,
+    current_value: float,
+    threshold: float,
+    metadata: dict[str, Any] | None = None,
+):
     """Alert for degraded model health"""
     return await alert_manager.raise_alert(
         AlertType.MODEL_HEALTH_DEGRADED,
@@ -501,14 +493,11 @@ async def alert_model_health_degraded(model_name: str,
         version=version,
         metadata=metadata,
         auto_resolve=True,
-        resolve_after_minutes=30
+        resolve_after_minutes=30,
     )
 
 
-async def alert_model_load_failed(model_name: str,
-                                 version: str,
-                                 error: str,
-                                 metadata: Optional[Dict[str, Any]] = None):
+async def alert_model_load_failed(model_name: str, version: str, error: str, metadata: dict[str, Any] | None = None):
     """Alert for model load failure"""
     return await alert_manager.raise_alert(
         AlertType.MODEL_LOAD_FAILED,
@@ -517,14 +506,13 @@ async def alert_model_load_failed(model_name: str,
         f"Failed to load {model_name} version {version}: {error}",
         model_name=model_name,
         version=version,
-        metadata=metadata
+        metadata=metadata,
     )
 
 
-async def alert_cache_eviction_high(model_name: str,
-                                   eviction_rate: float,
-                                   threshold: float,
-                                   metadata: Optional[Dict[str, Any]] = None):
+async def alert_cache_eviction_high(
+    model_name: str, eviction_rate: float, threshold: float, metadata: dict[str, Any] | None = None
+):
     """Alert for high cache eviction rate"""
     return await alert_manager.raise_alert(
         AlertType.CACHE_EVICTION_HIGH,
@@ -534,13 +522,11 @@ async def alert_cache_eviction_high(model_name: str,
         model_name=model_name,
         metadata=metadata,
         auto_resolve=True,
-        resolve_after_minutes=15
+        resolve_after_minutes=15,
     )
 
 
-async def alert_memory_usage_high(usage_percent: float,
-                                 threshold: float,
-                                 metadata: Optional[Dict[str, Any]] = None):
+async def alert_memory_usage_high(usage_percent: float, threshold: float, metadata: dict[str, Any] | None = None):
     """Alert for high memory usage"""
     return await alert_manager.raise_alert(
         AlertType.MEMORY_USAGE_HIGH,
@@ -549,14 +535,13 @@ async def alert_memory_usage_high(usage_percent: float,
         f"Memory usage is {usage_percent:.1f}% (threshold: {threshold:.1f}%)",
         metadata=metadata,
         auto_resolve=True,
-        resolve_after_minutes=10
+        resolve_after_minutes=10,
     )
 
 
-async def alert_request_latency_spike(model_name: str,
-                                     latency_ms: float,
-                                     baseline_ms: float,
-                                     metadata: Optional[Dict[str, Any]] = None):
+async def alert_request_latency_spike(
+    model_name: str, latency_ms: float, baseline_ms: float, metadata: dict[str, Any] | None = None
+):
     """Alert for request latency spike"""
     return await alert_manager.raise_alert(
         AlertType.REQUEST_LATENCY_SPIKE,
@@ -566,14 +551,13 @@ async def alert_request_latency_spike(model_name: str,
         model_name=model_name,
         metadata=metadata,
         auto_resolve=True,
-        resolve_after_minutes=20
+        resolve_after_minutes=20,
     )
 
 
-async def alert_transition_timeout(model_name: str,
-                                  transition_type: str,
-                                  timeout_seconds: int,
-                                  metadata: Optional[Dict[str, Any]] = None):
+async def alert_transition_timeout(
+    model_name: str, transition_type: str, timeout_seconds: int, metadata: dict[str, Any] | None = None
+):
     """Alert for transition timeout"""
     return await alert_manager.raise_alert(
         AlertType.TRANSITION_TIMEOUT,
@@ -581,15 +565,13 @@ async def alert_transition_timeout(model_name: str,
         f"Transition Timeout: {model_name}",
         f"{transition_type} transition for {model_name} timed out after {timeout_seconds}s",
         model_name=model_name,
-        metadata=metadata
+        metadata=metadata,
     )
 
 
-async def alert_version_rollback_triggered(model_name: str,
-                                          from_version: str,
-                                          to_version: str,
-                                          reason: str,
-                                          metadata: Optional[Dict[str, Any]] = None):
+async def alert_version_rollback_triggered(
+    model_name: str, from_version: str, to_version: str, reason: str, metadata: dict[str, Any] | None = None
+):
     """Alert for automatic version rollback"""
     return await alert_manager.raise_alert(
         AlertType.VERSION_ROLLBACK_TRIGGERED,
@@ -598,14 +580,13 @@ async def alert_version_rollback_triggered(model_name: str,
         f"Automatically rolled back {model_name} from {from_version} to {to_version}: {reason}",
         model_name=model_name,
         version=to_version,
-        metadata=metadata
+        metadata=metadata,
     )
 
 
-async def alert_strategy_execution_failed(model_name: str,
-                                         strategy_type: str,
-                                         error: str,
-                                         metadata: Optional[Dict[str, Any]] = None):
+async def alert_strategy_execution_failed(
+    model_name: str, strategy_type: str, error: str, metadata: dict[str, Any] | None = None
+):
     """Alert for switching strategy execution failure"""
     return await alert_manager.raise_alert(
         AlertType.STRATEGY_EXECUTION_FAILED,
@@ -613,17 +594,16 @@ async def alert_strategy_execution_failed(model_name: str,
         f"Strategy Execution Failed: {model_name}",
         f"Failed to execute {strategy_type} strategy for {model_name}: {error}",
         model_name=model_name,
-        metadata=metadata
+        metadata=metadata,
     )
 
 
-async def alert_configuration_error(error: str,
-                                   metadata: Optional[Dict[str, Any]] = None):
+async def alert_configuration_error(error: str, metadata: dict[str, Any] | None = None):
     """Alert for configuration errors"""
     return await alert_manager.raise_alert(
         AlertType.CONFIGURATION_ERROR,
         AlertSeverity.CRITICAL,
         "Configuration Error",
         f"Model switching configuration error: {error}",
-        metadata=metadata
+        metadata=metadata,
     )

@@ -6,22 +6,20 @@ including model registration, switching, monitoring, and configuration.
 """
 
 import asyncio
-import json
-import logging
-from typing import Dict, List, Any, Optional
 from datetime import datetime
+from typing import Any
 
-from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
-
-from vllm_omni.model_executor.models.dynamic_registry import DynamicModelRegistry
-from vllm_omni.model_executor.models.model_switcher import ModelSwitcher
-from vllm_omni.model_executor.models.health_monitor import HealthMonitor
-from vllm_omni.model_executor.models.config import get_model_switching_config, ModelSwitchingConfig
-from vllm_omni.model_executor.models.switching_strategies import SwitchingStrategyType
 from vllm.logger import init_logger
+
+from vllm_omni.model_executor.models.config import ModelSwitchingConfig, get_model_switching_config
+from vllm_omni.model_executor.models.dynamic_registry import DynamicModelRegistry
+from vllm_omni.model_executor.models.health_monitor import HealthMonitor
+from vllm_omni.model_executor.models.model_switcher import ModelSwitcher
+from vllm_omni.model_executor.models.switching_strategies import SwitchingStrategyType
 
 logger = init_logger(__name__)
 
@@ -29,30 +27,37 @@ logger = init_logger(__name__)
 # Pydantic models for API requests/responses
 class ModelRegistrationRequest(BaseModel):
     """Request model for registering a new model."""
+
     model: str = Field(..., description="Model path or identifier")
     model_arch: str = Field(..., description="Model architecture")
     model_stage: str = Field(..., description="Model stage (thinker, talker, etc.)")
     version: str = Field(..., description="Model version")
-    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Additional metadata")
+    metadata: dict[str, Any] | None = Field(default_factory=dict, description="Additional metadata")
+
 
 class SwitchRequest(BaseModel):
     """Request model for switching models."""
+
     model_id: str = Field(..., description="Model identifier")
     target_version: str = Field(..., description="Target version to switch to")
     strategy: SwitchingStrategyType = Field(default=SwitchingStrategyType.IMMEDIATE, description="Switching strategy")
-    strategy_config: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Strategy-specific configuration")
-    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Additional metadata")
+    strategy_config: dict[str, Any] | None = Field(default_factory=dict, description="Strategy-specific configuration")
+    metadata: dict[str, Any] | None = Field(default_factory=dict, description="Additional metadata")
+
 
 class ModelInfo(BaseModel):
     """Model information response."""
+
     model_id: str
-    versions: List[str]
-    active_version: Optional[str]
+    versions: list[str]
+    active_version: str | None
     health_status: str
-    metadata: Dict[str, Any]
+    metadata: dict[str, Any]
+
 
 class SwitchOperationResponse(BaseModel):
     """Response model for switch operations."""
+
     operation_id: str
     success: bool
     model_id: str
@@ -61,21 +66,25 @@ class SwitchOperationResponse(BaseModel):
     strategy: str
     status: str
     progress: float
-    duration_seconds: Optional[float]
-    error_message: Optional[str]
-    metadata: Dict[str, Any]
+    duration_seconds: float | None
+    error_message: str | None
+    metadata: dict[str, Any]
+
 
 class HealthMetricsResponse(BaseModel):
     """Response model for health metrics."""
+
     model_id: str
     version: str
     health_status: str
-    current_metrics: Dict[str, Any]
+    current_metrics: dict[str, Any]
     history_size: int
-    last_updated: Optional[float]
+    last_updated: float | None
+
 
 class AlertResponse(BaseModel):
     """Response model for alerts."""
+
     alert_id: str
     model_id: str
     version: str
@@ -85,12 +94,16 @@ class AlertResponse(BaseModel):
     timestamp: float
     resolved: bool
 
+
 class ConfigUpdateRequest(BaseModel):
     """Request model for configuration updates."""
-    config: Dict[str, Any] = Field(..., description="Configuration updates")
+
+    config: dict[str, Any] = Field(..., description="Configuration updates")
+
 
 class APIStats(BaseModel):
     """API statistics response."""
+
     total_requests: int
     active_operations: int
     registered_models: int
@@ -110,11 +123,13 @@ class ModelSwitchingAPI:
     - Statistics and monitoring
     """
 
-    def __init__(self,
-                 registry: DynamicModelRegistry,
-                 switcher: ModelSwitcher,
-                 health_monitor: HealthMonitor,
-                 config: Optional[ModelSwitchingConfig] = None):
+    def __init__(
+        self,
+        registry: DynamicModelRegistry,
+        switcher: ModelSwitcher,
+        health_monitor: HealthMonitor,
+        config: ModelSwitchingConfig | None = None,
+    ):
         """
         Initialize the API.
 
@@ -137,7 +152,7 @@ class ModelSwitchingAPI:
         self.app = FastAPI(
             title="vLLM-Omni Model Switching API",
             description="API for managing real-time model switching operations",
-            version="1.0.0"
+            version="1.0.0",
         )
 
         # Add CORS middleware
@@ -176,7 +191,7 @@ class ModelSwitchingAPI:
                 active_operations=len(self.switchier.active_operations),
                 registered_models=len(self.registry.model_versions),
                 alerts_count=len(self.health_monitor.alert_system.active_alerts),
-                uptime_seconds=current_time - self.start_time
+                uptime_seconds=current_time - self.start_time,
             )
 
         # Model management endpoints
@@ -189,9 +204,7 @@ class ModelSwitchingAPI:
                 from vllm_omni.config.model import OmniModelConfig
 
                 config = OmniModelConfig(
-                    model=request.model,
-                    model_arch=request.model_arch,
-                    model_stage=request.model_stage
+                    model=request.model, model_arch=request.model_arch, model_stage=request.model_stage
                 )
 
                 model_id = self.registry.register_model(config, request.version, request.metadata)
@@ -203,7 +216,7 @@ class ModelSwitchingAPI:
                 logger.error(f"Failed to register model: {e}")
                 raise HTTPException(status_code=400, detail=f"Registration failed: {e}")
 
-        @self.app.get("/models", response_model=List[ModelInfo])
+        @self.app.get("/models", response_model=list[ModelInfo])
         async def list_models():
             """List all registered models."""
             self.request_count += 1
@@ -219,13 +232,15 @@ class ModelSwitchingAPI:
                     model_key = f"{model_id}_{active_version}"
                     health_status = self.health_monitor.get_health_status(model_key).value
 
-                models.append(ModelInfo(
-                    model_id=model_id,
-                    versions=[v.version for v in versions],
-                    active_version=active_version,
-                    health_status=health_status,
-                    metadata=versions[0].metadata if versions else {}
-                ))
+                models.append(
+                    ModelInfo(
+                        model_id=model_id,
+                        versions=[v.version for v in versions],
+                        active_version=active_version,
+                        health_status=health_status,
+                        metadata=versions[0].metadata if versions else {},
+                    )
+                )
 
             return models
 
@@ -246,7 +261,9 @@ class ModelSwitchingAPI:
                 "active_version": active_instance.version if active_instance else None,
                 "health_status": self.health_monitor.get_health_status(
                     f"{model_id}_{active_instance.version}" if active_instance else ""
-                ).value if active_instance else "unknown"
+                ).value
+                if active_instance
+                else "unknown",
             }
 
         @self.app.delete("/models/{model_id}/versions/{version}")
@@ -279,7 +296,7 @@ class ModelSwitchingAPI:
                     target_version=request.target_version,
                     strategy_type=request.strategy,
                     strategy_config=request.strategy_config,
-                    metadata=request.metadata
+                    metadata=request.metadata,
                 )
 
                 response = SwitchOperationResponse(
@@ -293,7 +310,7 @@ class ModelSwitchingAPI:
                     progress=1.0 if result.success else 0.0,
                     duration_seconds=result.duration_seconds,
                     error_message=result.error_message,
-                    metadata=result.metadata
+                    metadata=result.metadata,
                 )
 
                 if result.success:
@@ -307,7 +324,7 @@ class ModelSwitchingAPI:
                 logger.error(f"Switch request failed: {e}")
                 raise HTTPException(status_code=500, detail=f"Switch failed: {e}")
 
-        @self.app.get("/switch/operations", response_model=List[Dict[str, Any]])
+        @self.app.get("/switch/operations", response_model=list[dict[str, Any]])
         async def list_switch_operations():
             """List all switch operations."""
             self.request_count += 1
@@ -338,7 +355,7 @@ class ModelSwitchingAPI:
             return {"status": "aborted"}
 
         # Health monitoring endpoints
-        @self.app.get("/health/models", response_model=List[HealthMetricsResponse])
+        @self.app.get("/health/models", response_model=list[HealthMetricsResponse])
         async def get_models_health():
             """Get health status for all models."""
             self.request_count += 1
@@ -350,14 +367,16 @@ class ModelSwitchingAPI:
                     model_key = f"{model_id}_{active_instance.version}"
                     metrics = self.health_monitor.get_model_metrics(model_key)
                     if metrics:
-                        health_data.append(HealthMetricsResponse(
-                            model_id=metrics["model_id"],
-                            version=metrics["version"],
-                            health_status=metrics["health_status"],
-                            current_metrics=metrics["current_metrics"],
-                            history_size=metrics["history_size"],
-                            last_updated=metrics["current_metrics"].get("timestamp")
-                        ))
+                        health_data.append(
+                            HealthMetricsResponse(
+                                model_id=metrics["model_id"],
+                                version=metrics["version"],
+                                health_status=metrics["health_status"],
+                                current_metrics=metrics["current_metrics"],
+                                history_size=metrics["history_size"],
+                                last_updated=metrics["current_metrics"].get("timestamp"),
+                            )
+                        )
 
             return health_data
 
@@ -377,8 +396,8 @@ class ModelSwitchingAPI:
 
             return metrics
 
-        @self.app.get("/alerts", response_model=List[AlertResponse])
-        async def get_alerts(model_id: Optional[str] = None):
+        @self.app.get("/alerts", response_model=list[AlertResponse])
+        async def get_alerts(model_id: str | None = None):
             """Get active alerts."""
             self.request_count += 1
 
@@ -392,7 +411,7 @@ class ModelSwitchingAPI:
                     title=alert.title,
                     message=alert.message,
                     timestamp=alert.timestamp,
-                    resolved=alert.resolved
+                    resolved=alert.resolved,
                 )
                 for alert in alerts
             ]
@@ -411,9 +430,7 @@ class ModelSwitchingAPI:
             self.request_count += 1
 
             # Only allow updating certain safe parameters
-            allowed_updates = {
-                "log_level", "enable_audit_logging", "audit_log_path"
-            }
+            allowed_updates = {"log_level", "enable_audit_logging", "audit_log_path"}
 
             updates = {}
             for key, value in request.config.items():
@@ -455,7 +472,7 @@ class ModelSwitchingAPI:
         """Get the FastAPI application instance."""
         return self.app
 
-    async def start_server(self, host: Optional[str] = None, port: Optional[int] = None):
+    async def start_server(self, host: str | None = None, port: int | None = None):
         """
         Start the API server.
 
@@ -473,7 +490,7 @@ class ModelSwitchingAPI:
         server = uvicorn.Server(config)
         await server.serve()
 
-    def get_openapi_schema(self) -> Dict[str, Any]:
+    def get_openapi_schema(self) -> dict[str, Any]:
         """Get the OpenAPI schema for the API."""
         return self.app.openapi()
 
@@ -483,7 +500,7 @@ def create_model_switching_api(
     registry: DynamicModelRegistry,
     switcher: ModelSwitcher,
     health_monitor: HealthMonitor,
-    config: Optional[ModelSwitchingConfig] = None
+    config: ModelSwitchingConfig | None = None,
 ) -> ModelSwitchingAPI:
     """
     Create a ModelSwitchingAPI instance.

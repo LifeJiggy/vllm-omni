@@ -4,22 +4,24 @@ Unit tests for Real-time Model Switching components.
 This module contains comprehensive tests for all model switching components.
 """
 
-import asyncio
+from unittest.mock import Mock, patch
+
 import pytest
-import time
-from unittest.mock import Mock, patch, MagicMock
 
 from vllm_omni.config.model import OmniModelConfig
-from vllm_omni.model_executor.models.dynamic_registry import DynamicModelRegistry, ModelInstance
-from vllm_omni.model_executor.models.version_manager import ModelVersionManager, FileVersionStorage
-from vllm_omni.model_executor.models.model_cache import ModelCache, MemoryManager
-from vllm_omni.model_executor.models.transition_manager import TransitionManager, RequestTracker
-from vllm_omni.model_executor.models.switching_strategies import (
-    SwitchingStrategyType, create_strategy, ImmediateSwitch, GradualRollout
-)
-from vllm_omni.model_executor.models.model_switcher import ModelSwitcher
-from vllm_omni.model_executor.models.health_monitor import HealthMonitor, AlertSystem, HealthStatus
 from vllm_omni.model_executor.models.config import ModelSwitchingConfig
+from vllm_omni.model_executor.models.dynamic_registry import DynamicModelRegistry, ModelInstance
+from vllm_omni.model_executor.models.health_monitor import HealthMonitor, HealthStatus
+from vllm_omni.model_executor.models.model_cache import MemoryManager, ModelCache
+from vllm_omni.model_executor.models.model_switcher import ModelSwitcher
+from vllm_omni.model_executor.models.switching_strategies import (
+    GradualRollout,
+    ImmediateSwitch,
+    SwitchingStrategyType,
+    create_strategy,
+)
+from vllm_omni.model_executor.models.transition_manager import TransitionManager
+from vllm_omni.model_executor.models.version_manager import FileVersionStorage, ModelVersionManager
 
 
 class TestDynamicModelRegistry:
@@ -35,9 +37,7 @@ class TestDynamicModelRegistry:
     def test_register_model(self, registry):
         """Test model registration."""
         config = OmniModelConfig(
-            model="test-model",
-            model_arch="Qwen2_5OmniForConditionalGeneration",
-            model_stage="thinker"
+            model="test-model", model_arch="Qwen2_5OmniForConditionalGeneration", model_stage="thinker"
         )
 
         model_id = registry.register_model(config, "v1.0")
@@ -47,22 +47,15 @@ class TestDynamicModelRegistry:
     def test_switch_model(self, registry):
         """Test model switching."""
         config = OmniModelConfig(
-            model="test-model",
-            model_arch="Qwen2_5OmniForConditionalGeneration",
-            model_stage="thinker"
+            model="test-model", model_arch="Qwen2_5OmniForConditionalGeneration", model_stage="thinker"
         )
 
         model_id = registry.register_model(config, "v1.0")
         registry.register_model(config, "v2.0")
 
         # Mock the _load_model method
-        with patch.object(registry, '_load_model') as mock_load:
-            mock_load.return_value = ModelInstance(
-                model_id=model_id,
-                version="v2.0",
-                config=config,
-                model="mock_model"
-            )
+        with patch.object(registry, "_load_model") as mock_load:
+            mock_load.return_value = ModelInstance(model_id=model_id, version="v2.0", config=config, model="mock_model")
 
             success = registry.switch_model(model_id, "v2.0")
             assert success
@@ -71,9 +64,7 @@ class TestDynamicModelRegistry:
     def test_deregister_model(self, registry):
         """Test model deregistration."""
         config = OmniModelConfig(
-            model="test-model",
-            model_arch="Qwen2_5OmniForConditionalGeneration",
-            model_stage="thinker"
+            model="test-model", model_arch="Qwen2_5OmniForConditionalGeneration", model_stage="thinker"
         )
 
         model_id = registry.register_model(config, "v1.0")
@@ -94,9 +85,7 @@ class TestModelVersionManager:
     def test_create_version(self, version_manager):
         """Test version creation."""
         config = OmniModelConfig(
-            model="test-model",
-            model_arch="Qwen2_5OmniForConditionalGeneration",
-            model_stage="thinker"
+            model="test-model", model_arch="Qwen2_5OmniForConditionalGeneration", model_stage="thinker"
         )
 
         version = version_manager.create_version("test_model", config, {"author": "test"})
@@ -107,13 +96,11 @@ class TestModelVersionManager:
     def test_rollback_to_version(self, version_manager):
         """Test version rollback."""
         config = OmniModelConfig(
-            model="test-model",
-            model_arch="Qwen2_5OmniForConditionalGeneration",
-            model_stage="thinker"
+            model="test-model", model_arch="Qwen2_5OmniForConditionalGeneration", model_stage="thinker"
         )
 
         v1 = version_manager.create_version("test_model", config)
-        v2 = version_manager.create_version("test_model", config)
+        _v2 = version_manager.create_version("test_model", config)
 
         success = version_manager.rollback_to_version("test_model", v1.version)
         assert success
@@ -134,17 +121,10 @@ class TestModelCache:
     def test_put_and_get_model(self, cache):
         """Test basic cache operations."""
         config = OmniModelConfig(
-            model="test-model",
-            model_arch="Qwen2_5OmniForConditionalGeneration",
-            model_stage="thinker"
+            model="test-model", model_arch="Qwen2_5OmniForConditionalGeneration", model_stage="thinker"
         )
 
-        instance = ModelInstance(
-            model_id="test_model",
-            version="v1.0",
-            config=config,
-            model="mock_model"
-        )
+        instance = ModelInstance(model_id="test_model", version="v1.0", config=config, model="mock_model")
 
         success = cache.put_model("test_key", instance)
         assert success
@@ -155,18 +135,13 @@ class TestModelCache:
     def test_cache_eviction(self, cache):
         """Test LRU eviction."""
         config = OmniModelConfig(
-            model="test-model",
-            model_arch="Qwen2_5OmniForConditionalGeneration",
-            model_stage="thinker"
+            model="test-model", model_arch="Qwen2_5OmniForConditionalGeneration", model_stage="thinker"
         )
 
         # Add 3 items to cache with max size 2
         for i in range(3):
             instance = ModelInstance(
-                model_id=f"test_model_{i}",
-                version=f"v{i}",
-                config=config,
-                model=f"mock_model_{i}"
+                model_id=f"test_model_{i}", version=f"v{i}", config=config, model=f"mock_model_{i}"
             )
             cache.put_model(f"key_{i}", instance)
 
@@ -186,9 +161,7 @@ class TestTransitionManager:
     def test_begin_transition(self, transition_manager):
         """Test transition initiation."""
         config = OmniModelConfig(
-            model="test-model",
-            model_arch="Qwen2_5OmniForConditionalGeneration",
-            model_stage="thinker"
+            model="test-model", model_arch="Qwen2_5OmniForConditionalGeneration", model_stage="thinker"
         )
 
         old_model = ModelInstance("test_model", "v1.0", config, "old_model")
@@ -201,9 +174,7 @@ class TestTransitionManager:
     def test_complete_transition(self, transition_manager):
         """Test transition completion."""
         config = OmniModelConfig(
-            model="test-model",
-            model_arch="Qwen2_5OmniForConditionalGeneration",
-            model_stage="thinker"
+            model="test-model", model_arch="Qwen2_5OmniForConditionalGeneration", model_stage="thinker"
         )
 
         old_model = ModelInstance("test_model", "v1.0", config, "old_model")
@@ -253,11 +224,11 @@ class TestSwitchingStrategies:
         operation.to_version = "v2.0"
 
         # Mock request routing
-        with patch('random.random', return_value=0.2):  # 20% - should route to old
+        with patch("random.random", return_value=0.2):  # 20% - should route to old
             version = strategy.get_traffic_distribution(operation, "req1")
             assert version == "v1.0"
 
-        with patch('random.random', return_value=0.4):  # 40% - should route to new
+        with patch("random.random", return_value=0.4):  # 40% - should route to new
             version = strategy.get_traffic_distribution(operation, "req2")
             assert version == "v2.0"
 
@@ -317,9 +288,7 @@ class TestModelSwitcher:
     def test_validate_switch_request(self, switcher):
         """Test switch request validation."""
         config = OmniModelConfig(
-            model="test-model",
-            model_arch="Qwen2_5OmniForConditionalGeneration",
-            model_stage="thinker"
+            model="test-model", model_arch="Qwen2_5OmniForConditionalGeneration", model_stage="thinker"
         )
 
         # Register a model
@@ -347,17 +316,13 @@ class TestModelSwitchingConfig:
 
         # Invalid config should raise
         with pytest.raises(ValueError):
-            ModelSwitchingConfig(
-                error_rate_warning_threshold=0.8,
-                error_rate_critical_threshold=0.5
-            )
+            ModelSwitchingConfig(error_rate_warning_threshold=0.8, error_rate_critical_threshold=0.5)
 
     def test_env_config(self):
         """Test environment-based configuration."""
-        with patch.dict('os.environ', {
-            'VLLM_MODEL_SWITCHING_MAX_CACHED_MODELS': '10',
-            'VLLM_MODEL_SWITCHING_ENABLE_CACHE': 'false'
-        }):
+        with patch.dict(
+            "os.environ", {"VLLM_MODEL_SWITCHING_MAX_CACHED_MODELS": "10", "VLLM_MODEL_SWITCHING_ENABLE_CACHE": "false"}
+        ):
             config = ModelSwitchingConfig.from_env()
             assert config.max_cached_models == 10
             assert not config.enable_model_cache

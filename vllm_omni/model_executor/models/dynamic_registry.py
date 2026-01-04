@@ -6,19 +6,17 @@ to support runtime registration, deregistration, and management of multiple mode
 """
 
 import asyncio
-import logging
 import threading
 import time
 from collections import defaultdict
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set, Tuple
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
+from typing import Any
 
-import torch
+from vllm.logger import init_logger
 
 from vllm_omni.config.model import OmniModelConfig
 from vllm_omni.model_executor.models.registry import OmniModelRegistry
-from vllm.logger import init_logger
 
 logger = init_logger(__name__)
 
@@ -26,6 +24,7 @@ logger = init_logger(__name__)
 @dataclass
 class ModelInstance:
     """Represents a loaded model instance with metadata."""
+
     model_id: str
     version: str
     config: OmniModelConfig
@@ -33,7 +32,7 @@ class ModelInstance:
     created_at: float = field(default_factory=time.time)
     last_used: float = field(default_factory=time.time)
     health_status: str = "healthy"  # healthy, degraded, failed
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     @property
     def age_seconds(self) -> float:
@@ -53,12 +52,13 @@ class ModelInstance:
 @dataclass
 class ModelVersion:
     """Represents a model version with metadata."""
+
     model_id: str
     version: str
     config: OmniModelConfig
     created_at: float = field(default_factory=time.time)
     status: str = "inactive"  # active, inactive, deprecated
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class DynamicModelRegistry:
@@ -72,10 +72,13 @@ class DynamicModelRegistry:
     - Automatic cleanup of unused models
     """
 
-    def __init__(self, base_registry: OmniModelRegistry,
-                 max_cached_models: int = 5,
-                 model_ttl_seconds: int = 3600,
-                 cleanup_interval: float = 300.0):
+    def __init__(
+        self,
+        base_registry: OmniModelRegistry,
+        max_cached_models: int = 5,
+        model_ttl_seconds: int = 3600,
+        cleanup_interval: float = 300.0,
+    ):
         """
         Initialize the dynamic model registry.
 
@@ -91,14 +94,14 @@ class DynamicModelRegistry:
         self.cleanup_interval = cleanup_interval
 
         # Model storage
-        self.active_models: Dict[str, ModelInstance] = {}  # model_id -> active ModelInstance
-        self.model_versions: Dict[str, List[ModelVersion]] = defaultdict(list)  # model_id -> List[ModelVersion]
-        self.model_cache: Dict[str, ModelInstance] = {}  # version_key -> ModelInstance
+        self.active_models: dict[str, ModelInstance] = {}  # model_id -> active ModelInstance
+        self.model_versions: dict[str, list[ModelVersion]] = defaultdict(list)  # model_id -> List[ModelVersion]
+        self.model_cache: dict[str, ModelInstance] = {}  # version_key -> ModelInstance
 
         # Threading and async
         self._lock = threading.RLock()
         self._executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="model-registry")
-        self._cleanup_task: Optional[asyncio.Task] = None
+        self._cleanup_task: asyncio.Task | None = None
 
         # Statistics
         self.stats = {
@@ -107,11 +110,13 @@ class DynamicModelRegistry:
             "cache_hits": 0,
             "cache_misses": 0,
             "load_failures": 0,
-            "switch_operations": 0
+            "switch_operations": 0,
         }
 
-        logger.info(f"Initialized DynamicModelRegistry with max_cached_models={max_cached_models}, "
-                   f"model_ttl={model_ttl_seconds}s")
+        logger.info(
+            f"Initialized DynamicModelRegistry with max_cached_models={max_cached_models}, "
+            f"model_ttl={model_ttl_seconds}s"
+        )
 
     def start_cleanup_task(self):
         """Start the background cleanup task."""
@@ -136,13 +141,11 @@ class DynamicModelRegistry:
 
     async def _cleanup_expired_models(self):
         """Clean up expired models from cache."""
-        current_time = time.time()
         expired_keys = []
 
         with self._lock:
             for key, instance in self.model_cache.items():
-                if (instance.idle_seconds > self.model_ttl_seconds and
-                    instance.model_id not in self.active_models):
+                if instance.idle_seconds > self.model_ttl_seconds and instance.model_id not in self.active_models:
                     expired_keys.append(key)
 
             for key in expired_keys:
@@ -154,8 +157,9 @@ class DynamicModelRegistry:
         if expired_keys:
             logger.info(f"Cleaned up {len(expired_keys)} expired models")
 
-    def register_model(self, model_config: OmniModelConfig, version: str,
-                      metadata: Optional[Dict[str, Any]] = None) -> str:
+    def register_model(
+        self, model_config: OmniModelConfig, version: str, metadata: dict[str, Any] | None = None
+    ) -> str:
         """
         Register a new model version.
 
@@ -172,10 +176,7 @@ class DynamicModelRegistry:
         with self._lock:
             # Create version entry
             version_entry = ModelVersion(
-                model_id=model_id,
-                version=version,
-                config=model_config,
-                metadata=metadata or {}
+                model_id=model_id, version=version, config=model_config, metadata=metadata or {}
             )
 
             # Add to versions list
@@ -210,11 +211,10 @@ class DynamicModelRegistry:
             versions = self.model_versions[model_id]
             for i, v in enumerate(versions):
                 if v.version == version:
-                    removed_version = versions.pop(i)
+                    _removed_version = versions.pop(i)
 
                     # If this was the active model, remove it
-                    if (model_id in self.active_models and
-                        self.active_models[model_id].version == version):
+                    if model_id in self.active_models and self.active_models[model_id].version == version:
                         del self.active_models[model_id]
 
                     # Remove from cache if present
@@ -229,7 +229,7 @@ class DynamicModelRegistry:
             logger.warning(f"Version {version} not found for model {model_id}")
             return False
 
-    def get_active_model(self, model_id: str) -> Optional[ModelInstance]:
+    def get_active_model(self, model_id: str) -> ModelInstance | None:
         """
         Get the currently active model instance for a model ID.
 
@@ -319,10 +319,10 @@ class DynamicModelRegistry:
             version=version.version,
             config=version.config,
             model=model,
-            metadata={"loaded_at": time.time()}
+            metadata={"loaded_at": time.time()},
         )
 
-    def get_model_versions(self, model_id: str) -> List[ModelVersion]:
+    def get_model_versions(self, model_id: str) -> list[ModelVersion]:
         """
         Get all versions for a model.
 
@@ -335,7 +335,7 @@ class DynamicModelRegistry:
         with self._lock:
             return self.model_versions.get(model_id, []).copy()
 
-    def get_registry_stats(self) -> Dict[str, Any]:
+    def get_registry_stats(self) -> dict[str, Any]:
         """
         Get registry statistics.
 
@@ -347,10 +347,10 @@ class DynamicModelRegistry:
                 **self.stats,
                 "active_models": len(self.active_models),
                 "cached_models": len(self.model_cache),
-                "total_versions": sum(len(versions) for versions in self.model_versions.values())
+                "total_versions": sum(len(versions) for versions in self.model_versions.values()),
             }
 
-    def list_models(self) -> Dict[str, List[str]]:
+    def list_models(self) -> dict[str, list[str]]:
         """
         List all registered models and their versions.
 
@@ -358,13 +358,10 @@ class DynamicModelRegistry:
             Dictionary mapping model_id to list of versions
         """
         with self._lock:
-            return {
-                model_id: [v.version for v in versions]
-                for model_id, versions in self.model_versions.items()
-            }
+            return {model_id: [v.version for v in versions] for model_id, versions in self.model_versions.items()}
 
     def __del__(self):
         """Cleanup on destruction."""
         self.stop_cleanup_task()
-        if hasattr(self, '_executor'):
+        if hasattr(self, "_executor"):
             self._executor.shutdown(wait=False)
