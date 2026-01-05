@@ -10,7 +10,7 @@ enabling concurrent request handling and streaming generation.
 
 import asyncio
 import uuid
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Iterable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import fields
 from typing import Any
@@ -280,6 +280,10 @@ class AsyncOmniDiffusion:
             self.close()
         except Exception:
             pass
+
+    async def abort(self, request_id: str | Iterable[str]) -> None:
+        """Abort a request."""
+        self.engine.abort(request_id)
 
     @property
     def is_running(self) -> bool:
