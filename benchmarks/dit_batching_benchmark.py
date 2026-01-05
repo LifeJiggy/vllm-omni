@@ -12,25 +12,24 @@ comparing throughput, latency, and GPU utilization with and without batching.
 import argparse
 import asyncio
 import json
-import time
 import statistics
-from concurrent.futures import ThreadPoolExecutor
+import time
 from dataclasses import dataclass
-from typing import List, Dict, Any, Optional
+from typing import Any
 
 import torch
 from tqdm import tqdm
 
-from vllm_omni.diffusion.request import OmniDiffusionRequest
+from vllm_omni.diffusion.config.batching import DiTBatchingConfig
 from vllm_omni.diffusion.data import OmniDiffusionConfig
 from vllm_omni.diffusion.diffusion_engine import DiffusionEngine
-from vllm_omni.diffusion.config.batching import DiTBatchingConfig
-from vllm_omni.entrypoints.async_omni_diffusion import AsyncOmniDiffusion
+from vllm_omni.diffusion.request import OmniDiffusionRequest
 
 
 @dataclass
 class BenchmarkResult:
     """Result of a benchmark run."""
+
     config_name: str
     total_requests: int
     total_time: float
@@ -41,9 +40,9 @@ class BenchmarkResult:
     p99_latency: float
     gpu_memory_peak_mb: float
     gpu_utilization_avg: float
-    batching_stats: Optional[Dict[str, Any]] = None
+    batching_stats: dict[str, Any] | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "config_name": self.config_name,
             "total_requests": self.total_requests,
@@ -95,7 +94,7 @@ class DiTBatchingBenchmark:
             ),
         }
 
-    def create_test_requests(self, num_requests: int, diverse: bool = True) -> List[OmniDiffusionRequest]:
+    def create_test_requests(self, num_requests: int, diverse: bool = True) -> list[OmniDiffusionRequest]:
         """Create test requests for benchmarking."""
         requests = []
 
@@ -136,14 +135,20 @@ class DiTBatchingBenchmark:
 
         return requests
 
-    async def benchmark_config(self, config_name: str, batching_config: DiTBatchingConfig,
-                              requests: List[OmniDiffusionRequest], num_runs: int = 3) -> BenchmarkResult:
+    async def benchmark_config(
+        self,
+        config_name: str,
+        batching_config: DiTBatchingConfig,
+        requests: list[OmniDiffusionRequest],
+        num_runs: int = 3,
+    ) -> BenchmarkResult:
         """Benchmark a specific configuration."""
         print(f"\nBenchmarking {config_name}...")
 
         latencies = []
         gpu_memory_usage = []
         gpu_utilizations = []
+        total_time_accum = 0.0
 
         for run in range(num_runs):
             print(f"  Run {run + 1}/{num_runs}")
@@ -181,7 +186,8 @@ class DiTBatchingBenchmark:
                     # For now, we'll use a placeholder
                     gpu_utilizations.append(85.0)  # Placeholder
 
-            total_time = time.time() - start_time
+            run_time = time.time() - start_time
+            total_time_accum += run_time
 
             latencies.extend(latencies_run)
 
@@ -194,20 +200,20 @@ class DiTBatchingBenchmark:
         p95_latency = statistics.quantiles(latencies, n=20)[18] if len(latencies) >= 20 else p50_latency
         p99_latency = statistics.quantiles(latencies, n=100)[98] if len(latencies) >= 100 else p50_latency
 
-        throughput = len(requests) * num_runs / sum([total_time] * num_runs) if total_time > 0 else 0
+        throughput = len(requests) * num_runs / total_time_accum if total_time_accum > 0 else 0
 
         peak_memory = max(gpu_memory_usage) if gpu_memory_usage else 0
         avg_gpu_util = statistics.mean(gpu_utilizations) if gpu_utilizations else 0
 
         # Get batching stats if available
         batching_stats = None
-        if hasattr(engine, 'get_batching_stats'):
-            batching_stats = engine.get_batching_stats()
+        # Note: engine is closed, so we can't get stats from it
+        # This would need to be collected during the run
 
         return BenchmarkResult(
             config_name=config_name,
             total_requests=len(requests) * num_runs,
-            total_time=total_time * num_runs,
+            total_time=total_time_accum,
             throughput_rps=throughput,
             avg_latency=avg_latency,
             p50_latency=p50_latency,
@@ -218,7 +224,9 @@ class DiTBatchingBenchmark:
             batching_stats=batching_stats,
         )
 
-    async def run_full_benchmark(self, num_requests: int = 50, diverse_requests: bool = True) -> Dict[str, BenchmarkResult]:
+    async def run_full_benchmark(
+        self, num_requests: int = 50, diverse_requests: bool = True
+    ) -> dict[str, BenchmarkResult]:
         """Run full benchmark suite comparing all configurations."""
         print("Starting DiT Batching Performance Benchmark")
         print("=" * 60)
@@ -237,29 +245,30 @@ class DiTBatchingBenchmark:
 
         return results
 
-    def print_results(self, results: Dict[str, BenchmarkResult]):
+    def print_results(self, results: dict[str, BenchmarkResult]):
         """Print benchmark results in a formatted way."""
         print("\n" + "=" * 80)
         print("BENCHMARK RESULTS")
         print("=" * 80)
 
-        print("<20")
+        print(
+            f"{'Config':<20}{'Throughput (rps)':<15}{'Avg Latency (s)':<15}"
+            f"{'P50 Latency (s)':<15}{'P95 Latency (s)':<15}{'Peak Memory (MB)':<15}{'GPU Util (%)':<12}"
+        )
         print("-" * 80)
 
         for result in results.values():
-            print("<20"
-                  "<8.2f"
-                  "<8.2f"
-                  "<8.2f"
-                  "<8.2f"
-                  "<10.0f"
-                  "<8.1f")
+            print(
+                f"{result.config_name:<20}{result.throughput_rps:<15.2f}{result.avg_latency:<15.2f}{result.p50_latency:<15.2f}{result.p95_latency:<15.2f}{result.gpu_memory_peak_mb:<15.0f}{result.gpu_utilization_avg:<12.1f}"
+            )
 
             if result.batching_stats:
                 stats = result.batching_stats
-                print(f"    Batching: avg_batch_size={stats.get('avg_batch_size', 0):.1f}, "
-                      f"batched_requests={stats.get('batched_requests', 0)}, "
-                      f"single_requests={stats.get('single_requests', 0)}")
+                print(
+                    f"    Batching: avg_batch_size={stats.get('avg_batch_size', 0):.1f}, "
+                    f"batched_requests={stats.get('batched_requests', 0)}, "
+                    f"single_requests={stats.get('single_requests', 0)}"
+                )
 
         # Calculate improvements
         if "no_batching" in results and "batching_medium" in results:
@@ -270,10 +279,10 @@ class DiTBatchingBenchmark:
             latency_improvement = ((base.avg_latency - batched.avg_latency) / base.avg_latency) * 100
 
             print("IMPROVEMENTS (Medium Batching vs No Batching):")
-            print(".1f")
-            print(".1f")
+            print(f"Throughput: +{throughput_improvement:.1f}%")
+            print(f"Latency: -{latency_improvement:.1f}%")
 
-    def save_results(self, results: Dict[str, BenchmarkResult], output_file: str):
+    def save_results(self, results: dict[str, BenchmarkResult], output_file: str):
         """Save results to JSON file."""
         data = {
             "benchmark_info": {
@@ -281,10 +290,10 @@ class DiTBatchingBenchmark:
                 "device": self.device,
                 "timestamp": time.time(),
             },
-            "results": {name: result.to_dict() for name, result in results.items()}
+            "results": {name: result.to_dict() for name, result in results.items()},
         }
 
-        with open(output_file, 'w') as f:
+        with open(output_file, "w") as f:
             json.dump(data, f, indent=2)
 
         print(f"\nResults saved to {output_file}")
@@ -292,24 +301,18 @@ class DiTBatchingBenchmark:
 
 async def main():
     parser = argparse.ArgumentParser(description="DiT Batching Performance Benchmark")
-    parser.add_argument("--model", type=str, default="Qwen/Qwen-Image",
-                       help="Model name to benchmark")
-    parser.add_argument("--num-requests", type=int, default=50,
-                       help="Number of requests per configuration")
-    parser.add_argument("--diverse", action="store_true", default=True,
-                       help="Use diverse prompts and parameters")
-    parser.add_argument("--output", type=str, default="dit_batching_benchmark_results.json",
-                       help="Output JSON file for results")
-    parser.add_argument("--device", type=str, default="auto",
-                       help="Device to use (auto, cuda, cpu)")
+    parser.add_argument("--model", type=str, default="Qwen/Qwen-Image", help="Model name to benchmark")
+    parser.add_argument("--num-requests", type=int, default=50, help="Number of requests per configuration")
+    parser.add_argument("--diverse", action="store_true", default=True, help="Use diverse prompts and parameters")
+    parser.add_argument(
+        "--output", type=str, default="dit_batching_benchmark_results.json", help="Output JSON file for results"
+    )
+    parser.add_argument("--device", type=str, default="auto", help="Device to use (auto, cuda, cpu)")
 
     args = parser.parse_args()
 
     benchmark = DiTBatchingBenchmark(model_name=args.model, device=args.device)
-    results = await benchmark.run_full_benchmark(
-        num_requests=args.num_requests,
-        diverse_requests=args.diverse
-    )
+    results = await benchmark.run_full_benchmark(num_requests=args.num_requests, diverse_requests=args.diverse)
 
     benchmark.print_results(results)
     benchmark.save_results(results, args.output)

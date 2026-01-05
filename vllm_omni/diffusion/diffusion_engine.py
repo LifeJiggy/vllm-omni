@@ -7,7 +7,7 @@ import time
 import weakref
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Optional, List
+from typing import Any
 
 from vllm.logger import init_logger
 
@@ -16,7 +16,7 @@ from vllm_omni.diffusion.data import SHUTDOWN_MESSAGE, OmniDiffusionConfig
 from vllm_omni.diffusion.registry import get_diffusion_post_process_func, get_diffusion_pre_process_func
 from vllm_omni.diffusion.request import OmniDiffusionRequest
 from vllm_omni.diffusion.scheduler import Scheduler, scheduler
-from vllm_omni.diffusion.scheduler.dit_batching_scheduler import DiTBatchingScheduler, BatchingConfig
+from vllm_omni.diffusion.scheduler.dit_batching_scheduler import BatchingConfig, DiTBatchingScheduler
 from vllm_omni.outputs import OmniRequestOutput
 from vllm_omni.utils.platform_utils import get_diffusion_worker_class
 
@@ -59,7 +59,7 @@ class BackgroundResources:
 class DiffusionEngine:
     """The diffusion engine for vLLM-Omni diffusion models."""
 
-    def __init__(self, od_config: OmniDiffusionConfig, batching_config: Optional[DiTBatchingConfig] = None):
+    def __init__(self, od_config: OmniDiffusionConfig, batching_config: DiTBatchingConfig | None = None):
         """Initialize the diffusion engine.
 
         Args:
@@ -73,7 +73,7 @@ class DiffusionEngine:
         self.batching_enabled = self.batching_config.enable_batching
 
         # Initialize batching scheduler if enabled
-        self.batching_scheduler: Optional[DiTBatchingScheduler] = None
+        self.batching_scheduler: DiTBatchingScheduler | None = None
         if self.batching_enabled:
             batch_config = BatchingConfig(
                 max_batch_size=self.batching_config.max_batch_size,
@@ -275,7 +275,7 @@ class DiffusionEngine:
             return self._step_without_batching(requests)
 
     @staticmethod
-    def make_engine(config: OmniDiffusionConfig, batching_config: Optional[DiTBatchingConfig] = None) -> "DiffusionEngine":
+    def make_engine(config: OmniDiffusionConfig, batching_config: DiTBatchingConfig | None = None) -> "DiffusionEngine":
         """Factory method to create a DiffusionEngine instance.
 
         Args:
@@ -475,7 +475,7 @@ class DiffusionEngine:
 
         self._finalizer()
 
-    def get_batching_stats(self) -> Optional[Dict[str, Any]]:
+    def get_batching_stats(self) -> dict[str, Any] | None:
         """Get batching performance statistics."""
         if self.batching_scheduler:
             return self.batching_scheduler.get_stats()

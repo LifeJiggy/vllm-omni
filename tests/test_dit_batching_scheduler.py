@@ -10,13 +10,14 @@ including compatibility grouping, fairness, memory safety, and performance.
 
 import asyncio
 import time
-import pytest
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
-from vllm_omni.diffusion.request import OmniDiffusionRequest
-from vllm_omni.diffusion.scheduler.dit_batching_scheduler import DiTBatchingScheduler, BatchingConfig
-from vllm_omni.diffusion.scheduler.compatibility import CompatibilityGroupManager
+import pytest
+
 from vllm_omni.diffusion.data import DiffusionOutput
+from vllm_omni.diffusion.request import OmniDiffusionRequest
+from vllm_omni.diffusion.scheduler.compatibility import CompatibilityGroupManager
+from vllm_omni.diffusion.scheduler.dit_batching_scheduler import BatchingConfig, DiTBatchingScheduler
 from vllm_omni.outputs import OmniRequestOutput
 
 
@@ -30,7 +31,7 @@ class TestCompatibilityGroupManager:
         # Create requests with different resolutions
         req1 = OmniDiffusionRequest(prompt="test", height=1024, width=1024)
         req2 = OmniDiffusionRequest(prompt="test", height=1024, width=1024)  # Same resolution
-        req3 = OmniDiffusionRequest(prompt="test", height=512, width=512)   # Different resolution
+        req3 = OmniDiffusionRequest(prompt="test", height=512, width=512)  # Different resolution
 
         # Add first request
         assert manager.add_request(req1)
@@ -140,7 +141,9 @@ class TestDiTBatchingScheduler:
     async def test_batch_formation_timeout(self):
         """Test batch formation with timeout."""
         req1 = OmniDiffusionRequest(prompt="test1", request_id="timeout-1")
-        req2 = OmniDiffusionRequest(prompt="test2", request_id="timeout-2", height=512, width=512)  # Different resolution
+        req2 = OmniDiffusionRequest(
+            prompt="test2", request_id="timeout-2", height=512, width=512
+        )  # Different resolution
 
         await self.scheduler.add_request(req1)
         await self.scheduler.add_request(req2)
@@ -206,8 +209,12 @@ class TestDiTBatchingScheduler:
         stats = self.scheduler.get_stats()
 
         expected_keys = [
-            "total_requests", "batched_requests", "single_requests",
-            "avg_batch_size", "queue_sizes", "active_groups"
+            "total_requests",
+            "batched_requests",
+            "single_requests",
+            "avg_batch_size",
+            "queue_sizes",
+            "active_groups",
         ]
 
         for key in expected_keys:
@@ -219,11 +226,7 @@ class TestDiTBatchingScheduler:
         requests = []
         for i in range(10):
             req = OmniDiffusionRequest(
-                prompt=f"test prompt {i}",
-                request_id=f"concurrent-{i}",
-                height=1024,
-                width=1024,
-                num_inference_steps=50
+                prompt=f"test prompt {i}", request_id=f"concurrent-{i}", height=1024, width=1024, num_inference_steps=50
             )
             requests.append(req)
 
@@ -251,11 +254,11 @@ class TestDiTBatchingScheduler:
 class TestIntegrationWithDiffusionEngine:
     """Integration tests with DiffusionEngine."""
 
-    @patch('vllm_omni.diffusion.diffusion_engine.DiffusionEngine.add_req_and_wait_for_response')
+    @patch("vllm_omni.diffusion.diffusion_engine.DiffusionEngine.add_req_and_wait_for_response")
     def test_engine_integration_batching_disabled(self, mock_process):
         """Test engine integration when batching is disabled."""
-        from vllm_omni.diffusion.diffusion_engine import DiffusionEngine
         from vllm_omni.diffusion.data import OmniDiffusionConfig
+        from vllm_omni.diffusion.diffusion_engine import DiffusionEngine
 
         config = OmniDiffusionConfig(model="test-model")
         engine = DiffusionEngine(config)  # No batching config = disabled
@@ -270,12 +273,12 @@ class TestIntegrationWithDiffusionEngine:
         assert result is not None
         mock_process.assert_called_once_with(requests)
 
-    @patch('vllm_omni.diffusion.diffusion_engine.DiffusionEngine.add_req_and_wait_for_response')
+    @patch("vllm_omni.diffusion.diffusion_engine.DiffusionEngine.add_req_and_wait_for_response")
     def test_engine_integration_batching_enabled(self, mock_process):
         """Test engine integration when batching is enabled."""
-        from vllm_omni.diffusion.diffusion_engine import DiffusionEngine
-        from vllm_omni.diffusion.data import OmniDiffusionConfig
         from vllm_omni.diffusion.config.batching import DiTBatchingConfig
+        from vllm_omni.diffusion.data import OmniDiffusionConfig
+        from vllm_omni.diffusion.diffusion_engine import DiffusionEngine
 
         config = OmniDiffusionConfig(model="test-model")
         batching_config = DiTBatchingConfig(enable_batching=True, max_batch_size=2)

@@ -2,6 +2,7 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """Worker classes for diffusion models."""
 
+from vllm_omni.diffusion.worker.dynamic_batch_handler import DynamicBatchHandler
 from vllm_omni.diffusion.worker.gpu_worker import GPUWorker, WorkerProc
 
-__all__ = ["GPUWorker", "WorkerProc"]
+__all__ = ["GPUWorker", "WorkerProc", "DynamicBatchHandler"]

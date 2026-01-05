@@ -122,23 +122,120 @@ class GPUWorker:
     @torch.inference_mode()
     def execute_model(self, reqs: list[OmniDiffusionRequest], od_config: OmniDiffusionConfig) -> DiffusionOutput:
         """
-        Execute a forward pass.
+        Execute a forward pass for one or more requests.
         """
         assert self.pipeline is not None
         if not reqs or len(reqs) == 0:
             raise ValueError("Cannot execute model with empty request list")
-        # TODO: dealing with first req for now
-        req = reqs[0]
 
-        if req.generator is None and req.seed is not None:
-            req.generator = torch.Generator(device=self.device).manual_seed(req.seed)
+        # Handle single request (existing behavior)
+        if len(reqs) == 1:
+            req = reqs[0]
+            if req.generator is None and req.seed is not None:
+                req.generator = torch.Generator(device=self.device).manual_seed(req.seed)
+
+            # Refresh cache context if needed
+            if self.cache_backend is not None and self.cache_backend.is_enabled():
+                self.cache_backend.refresh(self.pipeline, req.num_inference_steps)
+            with set_forward_context(vllm_config=self.vllm_config, omni_diffusion_config=self.od_config):
+                output = self.pipeline.forward(req)
+            return output
+
+        # Handle multiple requests with batching
+        return self._execute_batch_model(reqs, od_config)
+
+    def _execute_batch_model(self, reqs: list[OmniDiffusionRequest], od_config: OmniDiffusionConfig) -> DiffusionOutput:
+        """
+        Execute batched forward pass for multiple compatible requests.
+        """
+        # Check compatibility - for now, assume they are compatible as checked by scheduler
+        # In future, could add more validation here
+
+        # Use the first request's parameters for batch settings
+        ref_req = reqs[0]
+
+        # Prepare batch inputs
+        batch_prompts = []
+        batch_negative_prompts = []
+        batch_heights = []
+        batch_widths = []
+        batch_steps = []
+        batch_cfg_scales = []
+        batch_seeds = []
+        batch_num_outputs = []
+
+        for req in reqs:
+            batch_prompts.append(req.prompt or "")
+            batch_negative_prompts.append(req.negative_prompt or "")
+            batch_heights.append(req.height or 1024)
+            batch_widths.append(req.width or 1024)
+            batch_steps.append(req.num_inference_steps or 50)
+            batch_cfg_scales.append(req.guidance_scale or 1.0)
+            batch_seeds.append(req.seed)
+            batch_num_outputs.append(getattr(req, 'num_outputs_per_prompt', 1))
+
+        # For simplicity, use uniform batch parameters (first request's values)
+        # TODO: Implement more sophisticated batching that handles different parameters
+        uniform_height = batch_heights[0]
+        uniform_width = batch_widths[0]
+        uniform_steps = batch_steps[0]
+        uniform_cfg = batch_cfg_scales[0]
+
+        # Check if all requests have compatible parameters
+        if not all(h == uniform_height for h in batch_heights) or \
+           not all(w == uniform_width for w in batch_widths) or \
+           not all(s == uniform_steps for s in batch_steps) or \
+           not all(c == uniform_cfg for c in batch_cfg_scales):
+            # Fall back to sequential processing if parameters don't match
+            logger.warning("Requests have incompatible parameters, falling back to sequential processing")
+            return self._execute_sequential_batch(reqs, od_config)
+
+        # Create batch request
+        batch_req = OmniDiffusionRequest(
+            prompt=batch_prompts,
+            negative_prompt=batch_negative_prompts if any(batch_negative_prompts) else None,
+            height=uniform_height,
+            width=uniform_width,
+            num_inference_steps=uniform_steps,
+            guidance_scale=uniform_cfg,
+            num_outputs_per_prompt=batch_num_outputs[0],  # Assume same for all
+            seed=batch_seeds[0] if batch_seeds[0] is not None else None,
+        )
+
+        # Set generator if needed
+        if batch_req.generator is None and batch_req.seed is not None:
+            batch_req.generator = torch.Generator(device=self.device).manual_seed(batch_req.seed)
 
         # Refresh cache context if needed
         if self.cache_backend is not None and self.cache_backend.is_enabled():
-            self.cache_backend.refresh(self.pipeline, req.num_inference_steps)
+            self.cache_backend.refresh(self.pipeline, batch_req.num_inference_steps)
+
         with set_forward_context(vllm_config=self.vllm_config, omni_diffusion_config=self.od_config):
-            output = self.pipeline.forward(req)
-        return output
+            try:
+                output = self.pipeline.forward(batch_req)
+                return output
+            except Exception as e:
+                logger.error(f"Batch execution failed: {e}, falling back to sequential")
+                return self._execute_sequential_batch(reqs, od_config)
+
+    def _execute_sequential_batch(self, reqs: list[OmniDiffusionRequest], od_config: OmniDiffusionConfig) -> DiffusionOutput:
+        """
+        Execute requests sequentially and aggregate results.
+        """
+        results = []
+        for req in reqs:
+            single_output = self.execute_model([req], od_config)
+            if single_output.output is not None:
+                if isinstance(single_output.output, list):
+                    results.extend(single_output.output)
+                else:
+                    results.append(single_output.output)
+
+        return DiffusionOutput(
+            output=results,
+            trajectory_latents=None,  # Not preserved in batch mode
+            trajectory_timesteps=None
+        )
 
     def shutdown(self) -> None:
         destroy_distributed_env()

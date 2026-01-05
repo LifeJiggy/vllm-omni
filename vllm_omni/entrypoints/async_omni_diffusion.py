@@ -72,7 +72,7 @@ class AsyncOmniDiffusion:
             # Check if batching config is in kwargs
             batching_kwargs = {}
             for key in list(kwargs.keys()):
-                if key.startswith('batching_') or key in ['enable_batching', 'max_batch_size', 'min_batch_size']:
+                if key.startswith("batching_") or key in ["enable_batching", "max_batch_size", "min_batch_size"]:
                     batching_kwargs[key] = kwargs.pop(key)
 
             if batching_kwargs:
