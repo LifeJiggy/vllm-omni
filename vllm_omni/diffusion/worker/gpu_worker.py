@@ -151,9 +151,6 @@ class GPUWorker:
         # Check compatibility - for now, assume they are compatible as checked by scheduler
         # In future, could add more validation here
 
-        # Use the first request's parameters for batch settings
-        ref_req = reqs[0]
-
         # Prepare batch inputs
         batch_prompts = []
         batch_negative_prompts = []
@@ -172,7 +169,7 @@ class GPUWorker:
             batch_steps.append(req.num_inference_steps or 50)
             batch_cfg_scales.append(req.guidance_scale or 1.0)
             batch_seeds.append(req.seed)
-            batch_num_outputs.append(getattr(req, 'num_outputs_per_prompt', 1))
+            batch_num_outputs.append(getattr(req, "num_outputs_per_prompt", 1))
 
         # For simplicity, use uniform batch parameters (first request's values)
         # TODO: Implement more sophisticated batching that handles different parameters
@@ -182,10 +179,12 @@ class GPUWorker:
         uniform_cfg = batch_cfg_scales[0]
 
         # Check if all requests have compatible parameters
-        if not all(h == uniform_height for h in batch_heights) or \
-           not all(w == uniform_width for w in batch_widths) or \
-           not all(s == uniform_steps for s in batch_steps) or \
-           not all(c == uniform_cfg for c in batch_cfg_scales):
+        if (
+            not all(h == uniform_height for h in batch_heights)
+            or not all(w == uniform_width for w in batch_widths)
+            or not all(s == uniform_steps for s in batch_steps)
+            or not all(c == uniform_cfg for c in batch_cfg_scales)
+        ):
             # Fall back to sequential processing if parameters don't match
             logger.warning("Requests have incompatible parameters, falling back to sequential processing")
             return self._execute_sequential_batch(reqs, od_config)
@@ -218,7 +217,9 @@ class GPUWorker:
                 logger.error(f"Batch execution failed: {e}, falling back to sequential")
                 return self._execute_sequential_batch(reqs, od_config)
 
-    def _execute_sequential_batch(self, reqs: list[OmniDiffusionRequest], od_config: OmniDiffusionConfig) -> DiffusionOutput:
+    def _execute_sequential_batch(
+        self, reqs: list[OmniDiffusionRequest], od_config: OmniDiffusionConfig
+    ) -> DiffusionOutput:
         """
         Execute requests sequentially and aggregate results.
         """
@@ -234,7 +235,7 @@ class GPUWorker:
         return DiffusionOutput(
             output=results,
             trajectory_latents=None,  # Not preserved in batch mode
-            trajectory_timesteps=None
+            trajectory_timesteps=None,
         )
 
     def shutdown(self) -> None:

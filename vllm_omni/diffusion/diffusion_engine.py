@@ -5,7 +5,7 @@ import asyncio
 import multiprocessing as mp
 import time
 import weakref
-from collections.abc import Callable, Iterable
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
