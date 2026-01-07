@@ -15,6 +15,7 @@ except ImportError:
     RAY_AVAILABLE = False
 
 from vllm_omni.outputs import OmniRequestOutput
+
 from .health_monitor import HealthMonitor
 from .load_balancer import LoadBalancer
 
