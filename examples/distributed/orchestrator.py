@@ -14,7 +14,7 @@ except ImportError:
     ray = None
     RAY_AVAILABLE = False
 
-from ..outputs import OmniRequestOutput
+from vllm_omni.outputs import OmniRequestOutput
 from .health_monitor import HealthMonitor
 from .load_balancer import LoadBalancer
 
@@ -197,7 +197,7 @@ class NodeWorker:
         self.kwargs = kwargs
 
         # Initialize Omni instance for this node
-        from ..entrypoints.omni import Omni
+        from vllm_omni.entrypoints.omni import Omni
 
         self.omni = Omni(model=model, **kwargs)
 

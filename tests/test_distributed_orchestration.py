@@ -12,9 +12,9 @@ try:
 except ImportError:
     RAY_AVAILABLE = False
 
-from vllm_omni.distributed.health_monitor import HealthMonitor
-from vllm_omni.distributed.load_balancer import LoadBalancer
-from vllm_omni.distributed.orchestrator import DistributedScheduler
+from examples.distributed.health_monitor import HealthMonitor
+from examples.distributed.load_balancer import LoadBalancer
+from examples.distributed.orchestrator import DistributedScheduler
 
 
 @pytest.mark.skipif(not RAY_AVAILABLE, reason="Ray not available")
