@@ -44,7 +44,7 @@ def calculate_total_bytes(size_args, dtype):
     """
     num_elements = 1
     for s in size_args:
-        if isinstance(s, (tuple, list)):
+        if isinstance(s, tuple | list):
             for inner in s:
                 num_elements *= inner
         else:

@@ -266,7 +266,7 @@ class OmniMsgpackDecoder:
         if not data:
             return torch.empty(shape, dtype=torch_dtype)
 
-        buffer = bytearray(data) if isinstance(data, (bytes, memoryview)) else data
+        buffer = bytearray(data) if isinstance(data, bytes | memoryview) else data
         arr = torch.frombuffer(buffer, dtype=torch.uint8)
         return arr.view(torch_dtype).reshape(shape)
 

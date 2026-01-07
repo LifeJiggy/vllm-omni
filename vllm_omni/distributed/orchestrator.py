@@ -4,17 +4,19 @@
 import asyncio
 import logging
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 try:
     import ray
-    from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
+
     RAY_AVAILABLE = True
 except ImportError:
     ray = None
     RAY_AVAILABLE = False
 
 from ..outputs import OmniRequestOutput
+from .health_monitor import HealthMonitor
+from .load_balancer import LoadBalancer
 
 logger = logging.getLogger(__name__)
 
@@ -22,13 +24,7 @@ logger = logging.getLogger(__name__)
 class DistributedOrchestrator:
     """Coordinates inference across multiple nodes with load balancing and failure recovery."""
 
-    def __init__(
-        self,
-        model: str,
-        num_nodes: int = 2,
-        ray_address: Optional[str] = None,
-        **kwargs
-    ):
+    def __init__(self, model: str, num_nodes: int = 2, ray_address: str | None = None, **kwargs):
         if not RAY_AVAILABLE:
             raise ImportError("Ray is required for distributed orchestration")
 
@@ -42,30 +38,21 @@ class DistributedOrchestrator:
             ray.init(address=ray_address, ignore_reinit_error=True)
 
         # Create distributed scheduler
-        self.scheduler = DistributedScheduler.remote(
-            model=model,
-            num_nodes=num_nodes,
-            **kwargs
-        )
+        self.scheduler = DistributedScheduler.remote(model=model, num_nodes=num_nodes, **kwargs)
 
         logger.info(f"Initialized distributed orchestrator with {num_nodes} nodes")
 
     async def generate(
-        self,
-        prompts: Any,
-        sampling_params_list: Optional[List] = None,
-        **kwargs
-    ) -> List[OmniRequestOutput]:
+        self, prompts: Any, sampling_params_list: list | None = None, **kwargs
+    ) -> list[OmniRequestOutput]:
         """Generate outputs using distributed orchestration."""
         return await self.scheduler.generate.remote(
-            prompts=prompts,
-            sampling_params_list=sampling_params_list,
-            **kwargs
+            prompts=prompts, sampling_params_list=sampling_params_list, **kwargs
         )
 
     def close(self):
         """Clean up distributed resources."""
-        if hasattr(self, 'scheduler'):
+        if hasattr(self, "scheduler"):
             ray.kill(self.scheduler)
         if ray.is_initialized():
             ray.shutdown()
@@ -87,11 +74,7 @@ class DistributedScheduler:
         # Create node actors
         self.node_actors = []
         for i in range(num_nodes):
-            node = NodeWorker.remote(
-                node_id=i,
-                model=model,
-                **kwargs
-            )
+            node = NodeWorker.remote(node_id=i, model=model, **kwargs)
             self.node_actors.append(node)
 
         # Register nodes with health monitor
@@ -101,7 +84,7 @@ class DistributedScheduler:
 
     async def generate(self, prompts, sampling_params_list=None, **kwargs):
         """Distribute generation requests across healthy nodes with failure recovery."""
-        max_retries = kwargs.get('max_retries', 2)
+        max_retries = kwargs.get("max_retries", 2)
 
         for attempt in range(max_retries + 1):
             try:
@@ -111,15 +94,13 @@ class DistributedScheduler:
                 if not healthy_nodes:
                     if attempt < max_retries:
                         logger.warning(f"No healthy nodes available, attempt {attempt + 1}/{max_retries + 1}")
-                        await asyncio.sleep(2 ** attempt)  # Exponential backoff
+                        await asyncio.sleep(2**attempt)  # Exponential backoff
                         continue
                     raise RuntimeError("No healthy nodes available after retries")
 
                 # Distribute requests using load balancer
                 request_batches = await self.load_balancer.distribute_requests.remote(
-                    prompts=prompts,
-                    sampling_params_list=sampling_params_list,
-                    healthy_nodes=healthy_nodes
+                    prompts=prompts, sampling_params_list=sampling_params_list, healthy_nodes=healthy_nodes
                 )
 
                 # Execute on nodes with failure handling
@@ -147,7 +128,7 @@ class DistributedScheduler:
             except Exception as e:
                 if attempt < max_retries:
                     logger.warning(f"Generation attempt {attempt + 1} failed: {e}")
-                    await asyncio.sleep(2 ** attempt)
+                    await asyncio.sleep(2**attempt)
                 else:
                     raise e
 
@@ -181,9 +162,7 @@ class DistributedScheduler:
 
         if all_failed_prompts:
             retry_batches = await self.load_balancer.distribute_requests.remote(
-                prompts=all_failed_prompts,
-                sampling_params_list=all_failed_params,
-                healthy_nodes=healthy_nodes
+                prompts=all_failed_prompts, sampling_params_list=all_failed_params, healthy_nodes=healthy_nodes
             )
 
             # Execute retry batches
@@ -204,7 +183,7 @@ class DistributedScheduler:
             "healthy_nodes": ray.get(self.health_monitor.get_healthy_nodes.remote()),
             "unhealthy_nodes": ray.get(self.health_monitor.get_unhealthy_nodes.remote()),
             "load_distribution": ray.get(self.load_balancer.get_load_stats.remote()),
-            "health_stats": ray.get(self.health_monitor.get_health_stats.remote())
+            "health_stats": ray.get(self.health_monitor.get_health_stats.remote()),
         }
 
 
@@ -219,6 +198,7 @@ class NodeWorker:
 
         # Initialize Omni instance for this node
         from ..entrypoints.omni import Omni
+
         self.omni = Omni(model=model, **kwargs)
 
         logger.info(f"Node {node_id} initialized with model {model}")
@@ -229,10 +209,7 @@ class NodeWorker:
         sampling_params_list = batch.get("sampling_params_list", [])
 
         results = []
-        for output in self.omni.generate(
-            prompts=prompts,
-            sampling_params_list=sampling_params_list
-        ):
+        for output in self.omni.generate(prompts=prompts, sampling_params_list=sampling_params_list):
             results.append(output)
 
         return results

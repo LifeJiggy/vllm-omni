@@ -4,10 +4,10 @@
 import asyncio
 import logging
 import time
-from typing import Dict, List, Optional
 
 try:
     import ray
+
     RAY_AVAILABLE = True
 except ImportError:
     ray = None
@@ -36,7 +36,7 @@ class HealthMonitor:
 
         logger.info("Initialized health monitor")
 
-    def register_nodes(self, nodes: List):
+    def register_nodes(self, nodes: list):
         """Register nodes for health monitoring."""
         self.nodes = nodes
         for i, node in enumerate(nodes):
@@ -92,15 +92,15 @@ class HealthMonitor:
         else:
             logger.warning(f"Node {node_id} health check failed ({self.failure_counts[node_id]}/{self.max_failures})")
 
-    def get_healthy_nodes(self) -> List[int]:
+    def get_healthy_nodes(self) -> list[int]:
         """Get list of healthy node IDs."""
         return [node_id for node_id, healthy in self.node_health.items() if healthy]
 
-    def get_unhealthy_nodes(self) -> List[int]:
+    def get_unhealthy_nodes(self) -> list[int]:
         """Get list of unhealthy node IDs."""
         return [node_id for node_id, healthy in self.node_health.items() if not healthy]
 
-    def get_health_stats(self) -> Dict:
+    def get_health_stats(self) -> dict:
         """Get comprehensive health statistics."""
         return {
             "total_nodes": len(self.nodes),
@@ -108,7 +108,7 @@ class HealthMonitor:
             "unhealthy_nodes": len(self.get_unhealthy_nodes()),
             "node_health": dict(self.node_health),
             "failure_counts": dict(self.failure_counts),
-            "last_checks": dict(self.last_health_check)
+            "last_checks": dict(self.last_health_check),
         }
 
     def reset_node_health(self, node_id: int):

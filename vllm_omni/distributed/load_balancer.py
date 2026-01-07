@@ -2,12 +2,12 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import logging
-import time
 from collections import defaultdict
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 try:
     import ray
+
     RAY_AVAILABLE = True
 except ImportError:
     ray = None
@@ -35,11 +35,8 @@ class LoadBalancer:
         logger.info(f"Initialized load balancer with {num_nodes} nodes, strategy: {strategy}")
 
     def distribute_requests(
-        self,
-        prompts: Any,
-        sampling_params_list: Optional[List] = None,
-        healthy_nodes: Optional[List[int]] = None
-    ) -> Dict[int, Dict[str, Any]]:
+        self, prompts: Any, sampling_params_list: list | None = None, healthy_nodes: list[int] | None = None
+    ) -> dict[int, dict[str, Any]]:
         """Distribute requests across healthy nodes."""
         if healthy_nodes is None:
             healthy_nodes = list(range(self.num_nodes))
@@ -62,11 +59,8 @@ class LoadBalancer:
             return self._distribute_round_robin(prompts, sampling_params_list, healthy_nodes)
 
     def _distribute_round_robin(
-        self,
-        prompts: List,
-        sampling_params_list: Optional[List],
-        healthy_nodes: List[int]
-    ) -> Dict[int, Dict[str, Any]]:
+        self, prompts: list, sampling_params_list: list | None, healthy_nodes: list[int]
+    ) -> dict[int, dict[str, Any]]:
         """Round-robin distribution."""
         batches = defaultdict(lambda: {"prompts": [], "sampling_params_list": []})
 
@@ -83,11 +77,8 @@ class LoadBalancer:
         return dict(batches)
 
     def _distribute_least_loaded(
-        self,
-        prompts: List,
-        sampling_params_list: Optional[List],
-        healthy_nodes: List[int]
-    ) -> Dict[int, Dict[str, Any]]:
+        self, prompts: list, sampling_params_list: list | None, healthy_nodes: list[int]
+    ) -> dict[int, dict[str, Any]]:
         """Distribute to least loaded nodes."""
         batches = defaultdict(lambda: {"prompts": [], "sampling_params_list": []})
 
@@ -108,13 +99,13 @@ class LoadBalancer:
         """Update load for a specific node."""
         self.node_loads[node_id] += load_delta
 
-    def get_load_stats(self) -> Dict[str, Any]:
+    def get_load_stats(self) -> dict[str, Any]:
         """Get current load statistics."""
         return {
             "node_loads": dict(self.node_loads),
             "node_capacities": dict(self.node_capacities),
             "strategy": self.strategy,
-            "total_requests": sum(self.node_loads.values())
+            "total_requests": sum(self.node_loads.values()),
         }
 
     def reset_loads(self):

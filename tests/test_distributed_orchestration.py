@@ -1,18 +1,20 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
+from unittest.mock import Mock
+
 import pytest
-from unittest.mock import Mock, patch
 
 try:
     import ray
+
     RAY_AVAILABLE = True
 except ImportError:
     RAY_AVAILABLE = False
 
-from vllm_omni.distributed.orchestrator import DistributedOrchestrator, DistributedScheduler
-from vllm_omni.distributed.load_balancer import LoadBalancer
 from vllm_omni.distributed.health_monitor import HealthMonitor
+from vllm_omni.distributed.load_balancer import LoadBalancer
+from vllm_omni.distributed.orchestrator import DistributedScheduler
 
 
 @pytest.mark.skipif(not RAY_AVAILABLE, reason="Ray not available")
@@ -24,10 +26,7 @@ class TestDistributedOrchestration:
         balancer = LoadBalancer.remote(num_nodes=3, strategy="round_robin")
 
         prompts = ["prompt1", "prompt2", "prompt3", "prompt4"]
-        batches = ray.get(balancer.distribute_requests.remote(
-            prompts=prompts,
-            healthy_nodes=[0, 1, 2]
-        ))
+        batches = ray.get(balancer.distribute_requests.remote(prompts=prompts, healthy_nodes=[0, 1, 2]))
 
         assert len(batches) <= 3  # Should distribute across nodes
         total_distributed = sum(len(batch["prompts"]) for batch in batches.values())
@@ -41,10 +40,7 @@ class TestDistributedOrchestration:
         ray.get(balancer.update_node_load.remote(0, 5))
 
         prompts = ["prompt1", "prompt2"]
-        batches = ray.get(balancer.distribute_requests.remote(
-            prompts=prompts,
-            healthy_nodes=[0, 1]
-        ))
+        batches = ray.get(balancer.distribute_requests.remote(prompts=prompts, healthy_nodes=[0, 1]))
 
         # Should prefer node 1 (less loaded)
         assert 1 in batches
@@ -67,10 +63,7 @@ class TestDistributedOrchestration:
 
     def test_distributed_scheduler_basic(self):
         """Test basic distributed scheduler functionality."""
-        scheduler = DistributedScheduler.remote(
-            model="test-model",
-            num_nodes=2
-        )
+        scheduler = DistributedScheduler.remote(model="test-model", num_nodes=2)
 
         stats = ray.get(scheduler.get_stats.remote())
         assert stats["num_nodes"] == 2
@@ -79,10 +72,7 @@ class TestDistributedOrchestration:
 
     def test_failure_recovery(self):
         """Test failure recovery mechanisms."""
-        scheduler = DistributedScheduler.remote(
-            model="test-model",
-            num_nodes=2
-        )
+        scheduler = DistributedScheduler.remote(model="test-model", num_nodes=2)
 
         # Simulate node failure and recovery
         ray.get(scheduler._handle_node_failure.remote(0))
