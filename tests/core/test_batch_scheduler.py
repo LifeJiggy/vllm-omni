@@ -1,7 +1,5 @@
 """Unit tests for batch scheduler."""
 
-import pytest
-
 from vllm_omni.core.batch_scheduler import (
     AdaptiveBatchScheduler,
     BatchSchedulingConfig,

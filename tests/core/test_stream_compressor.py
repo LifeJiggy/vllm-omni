@@ -1,7 +1,6 @@
 """Unit tests for stream compressor."""
 
 import pytest
-import asyncio
 
 from vllm_omni.core.stream_compressor import (
     CompressionType,

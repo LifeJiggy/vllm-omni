@@ -11,6 +11,16 @@ from vllm_omni.core.stream_compressor import (
     StreamCompressor,
     StreamCompressorConfig,
 )
+from vllm_omni.core.gpu_memory_pool import (
+    GPUMemoryPool,
+    GPUMemoryPoolConfig,
+    MemoryPoolMetrics,
+)
+from vllm_omni.core.request_deduplicator import (
+    RequestDeduplicator,
+    DeduplicationConfig,
+    DeduplicationMetrics,
+)
 
 __all__ = [
     "AdaptiveBatchScheduler",
@@ -20,4 +30,10 @@ __all__ = [
     "CompressionType",
     "StreamCompressor",
     "StreamCompressorConfig",
+    "GPUMemoryPool",
+    "GPUMemoryPoolConfig",
+    "MemoryPoolMetrics",
+    "RequestDeduplicator",
+    "DeduplicationConfig",
+    "DeduplicationMetrics",
 ]
